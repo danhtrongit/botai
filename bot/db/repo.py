@@ -6,7 +6,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db import models
-from bot.db.models import AppSetting, Order, Product, StockItem
+from bot.db.models import AppSetting, Order, Product, StockItem, StockWaitlist, User, WalletTx
 
 
 # ---------- App settings (key-value) ----------
@@ -346,3 +346,160 @@ async def profit_summary(session: AsyncSession) -> tuple[int, int, int, int]:
     )
     cost = int(stock_cost or 0) + int(order_cost or 0)
     return revenue, cost, revenue - cost, count
+
+
+# ---------- Users & wallet ----------
+
+async def upsert_user(session: AsyncSession, tg_id: int, username: str | None) -> User:
+    """Tạo user nếu chưa có, cập nhật username nếu đổi. Trả về User."""
+    user = await session.get(User, tg_id)
+    if user is None:
+        user = User(tg_id=tg_id, username=username, balance=0)
+        session.add(user)
+        await session.flush()
+    elif username and user.username != username:
+        user.username = username
+    return user
+
+
+async def get_user(session: AsyncSession, tg_id: int) -> User | None:
+    return await session.get(User, tg_id)
+
+
+async def list_users(session: AsyncSession, limit: int = 200) -> list[User]:
+    stmt = select(User).order_by(User.updated_at.desc()).limit(limit)
+    return list((await session.scalars(stmt)).all())
+
+
+async def _record_wallet_tx(
+    session: AsyncSession,
+    *,
+    user: User,
+    amount: int,
+    tx_type: str,
+    status: str = models.TX_CONFIRMED,
+    note: str = "",
+    ref_code: str | None = None,
+) -> WalletTx:
+    """Ghi 1 dòng sổ ví. Nếu confirmed thì cập nhật số dư + balance_after."""
+    if status == models.TX_CONFIRMED:
+        user.balance += amount
+        balance_after = user.balance
+    else:
+        balance_after = None
+    tx = WalletTx(
+        user_tg_id=user.tg_id,
+        amount=amount,
+        type=tx_type,
+        status=status,
+        note=note,
+        ref_code=ref_code,
+        balance_after=balance_after,
+    )
+    session.add(tx)
+    await session.flush()
+    return tx
+
+
+async def adjust_balance(
+    session: AsyncSession, tg_id: int, amount: int, note: str = "", username: str | None = None
+) -> tuple[bool, User | None]:
+    """Admin cộng/trừ tiền (amount dương=cộng, âm=trừ). Chặn để số dư không âm."""
+    user = await upsert_user(session, tg_id, username)
+    if amount < 0 and user.balance + amount < 0:
+        return False, user
+    tx_type = models.TX_ADMIN_CREDIT if amount >= 0 else models.TX_ADMIN_DEBIT
+    await _record_wallet_tx(session, user=user, amount=amount, tx_type=tx_type, note=note)
+    return True, user
+
+
+async def create_pending_topup(
+    session: AsyncSession, user: User, amount: int, ref_code: str
+) -> WalletTx:
+    """Tạo yêu cầu nạp tiền đang chờ admin duyệt (chưa cộng số dư)."""
+    return await _record_wallet_tx(
+        session, user=user, amount=amount, tx_type=models.TX_TOPUP,
+        status=models.TX_PENDING, ref_code=ref_code, note="Nạp tiền chờ duyệt",
+    )
+
+
+async def get_wallet_tx_by_code(session: AsyncSession, ref_code: str) -> WalletTx | None:
+    return await session.scalar(select(WalletTx).where(WalletTx.ref_code == ref_code))
+
+
+async def confirm_topup(session: AsyncSession, ref_code: str, admin_id: int) -> WalletTx | None:
+    """Duyệt nạp tiền: chuyển pending->confirmed + cộng số dư. Idempotent."""
+    tx = await get_wallet_tx_by_code(session, ref_code)
+    if tx is None or tx.status != models.TX_PENDING:
+        return None
+    user = await session.get(User, tx.user_tg_id)
+    if user is None:
+        return None
+    user.balance += tx.amount
+    tx.status = models.TX_CONFIRMED
+    tx.balance_after = user.balance
+    tx.note = f"Nạp tiền (duyệt bởi {admin_id})"
+    await session.flush()
+    return tx
+
+
+async def reject_topup(session: AsyncSession, ref_code: str) -> WalletTx | None:
+    tx = await get_wallet_tx_by_code(session, ref_code)
+    if tx is None or tx.status != models.TX_PENDING:
+        return None
+    tx.status = models.TX_REJECTED
+    await session.flush()
+    return tx
+
+
+async def charge_wallet(
+    session: AsyncSession, user: User, amount: int, note: str, ref_code: str | None = None
+) -> bool:
+    """Trừ tiền ví khi mua. Trả False nếu không đủ số dư."""
+    if amount <= 0 or user.balance < amount:
+        return False
+    await _record_wallet_tx(
+        session, user=user, amount=-amount, tx_type=models.TX_PURCHASE,
+        note=note, ref_code=ref_code,
+    )
+    return True
+
+
+async def list_wallet_txs(session: AsyncSession, tg_id: int, limit: int = 50) -> list[WalletTx]:
+    stmt = (
+        select(WalletTx)
+        .where(WalletTx.user_tg_id == tg_id)
+        .order_by(WalletTx.id.desc())
+        .limit(limit)
+    )
+    return list((await session.scalars(stmt)).all())
+
+
+# ---------- Stock waitlist (báo khi có hàng) ----------
+
+async def add_to_waitlist(session: AsyncSession, user_tg_id: int, product_id: int) -> bool:
+    """Đăng ký nhận báo hàng. Trả False nếu đã đăng ký trước đó."""
+    existing = await session.scalar(
+        select(StockWaitlist).where(
+            StockWaitlist.user_tg_id == user_tg_id,
+            StockWaitlist.product_id == product_id,
+        )
+    )
+    if existing is not None:
+        return False
+    session.add(StockWaitlist(user_tg_id=user_tg_id, product_id=product_id))
+    await session.flush()
+    return True
+
+
+async def pop_waitlist_for_product(session: AsyncSession, product_id: int) -> list[int]:
+    """Lấy danh sách user chờ báo hàng của SP rồi xoá khỏi waitlist. Trả list tg_id."""
+    rows = await session.scalars(
+        select(StockWaitlist.user_tg_id).where(StockWaitlist.product_id == product_id)
+    )
+    user_ids = list(dict.fromkeys(rows.all()))  # unique, giữ thứ tự
+    if user_ids:
+        await session.execute(
+            delete(StockWaitlist).where(StockWaitlist.product_id == product_id)
+        )
+    return user_ids

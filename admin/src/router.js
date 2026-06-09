@@ -5,6 +5,7 @@ import Stock from './pages/Stock.vue'
 import Orders from './pages/Orders.vue'
 import OrderDetail from './pages/OrderDetail.vue'
 import Sold from './pages/Sold.vue'
+import Users from './pages/Users.vue'
 
 const routes = [
   { path: '/', name: 'dashboard', component: Dashboard, meta: { title: 'Tổng quan' } },
@@ -13,6 +14,7 @@ const routes = [
   { path: '/orders', name: 'orders', component: Orders, meta: { title: 'Đơn hàng' } },
   { path: '/orders/:id', name: 'order-detail', component: OrderDetail, meta: { title: 'Chi tiết đơn' } },
   { path: '/sold', name: 'sold', component: Sold, meta: { title: 'Đã bán' } },
+  { path: '/users', name: 'users', component: Users, meta: { title: 'Người dùng' } },
 ]
 
 export default createRouter({

@@ -58,6 +58,10 @@ export const api = {
   completeUpgrade: (id, cost) => request('POST', `/orders/${id}/complete-upgrade`, { cost }),
 
   sold: () => request('GET', '/sold'),
+
+  users: () => request('GET', '/users'),
+  userDetail: (tgId) => request('GET', `/users/${tgId}`),
+  adjustUser: (tgId, amount, note) => request('POST', `/users/${tgId}/adjust`, { amount, note }),
 }
 
 // Tiện ích định dạng tiền VND.

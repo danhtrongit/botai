@@ -12,8 +12,8 @@ from bot.config import get_settings
 from bot.db import models, repo
 from bot.db.database import async_session
 from bot.services import orders as order_service
-from bot.services import delivery, payment
-from bot.states import BuyFlow
+from bot.services import delivery, payment, wallet
+from bot.states import BuyFlow, TopUpFlow
 
 router = Router(name="user")
 
@@ -92,6 +92,10 @@ async def _orders_view(user_id: int) -> tuple[str, object]:
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
+    # Ghi nhận user để có trong danh sách (ví, thông báo...).
+    async with async_session() as session:
+        await repo.upsert_user(session, message.from_user.id, message.from_user.username)
+        await session.commit()
     # Bàn phím nút bấm cố định dưới khung chat để user luôn biết bấm gì.
     await message.answer(WELCOME, reply_markup=keyboards.reply_menu())
     await message.answer("Chọn thao tác:", reply_markup=keyboards.main_menu())
@@ -190,7 +194,13 @@ async def cb_select_product(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     if available <= 0:
-        await callback.answer("Sản phẩm đã hết hàng.", show_alert=True)
+        # Hết hàng -> cho phép đăng ký nhận báo khi có hàng trở lại.
+        await callback.message.edit_text(
+            f"<b>{product.name}</b> hiện đã hết hàng.\n\n"
+            "Bấm 🔔 <b>Báo khi có hàng</b> để được nhắn ngay khi có hàng trở lại.",
+            reply_markup=keyboards.restock_subscribe_keyboard(product_id),
+        )
+        await callback.answer()
         return
 
     await state.set_state(BuyFlow.choosing_quantity)
@@ -274,9 +284,15 @@ async def cb_qty_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(BuyFlow.awaiting_payment)
     await state.update_data(order_id=order.id)
 
+    # Nếu đủ số dư ví -> hiện thêm nút thanh toán bằng số dư.
+    async with async_session() as session:
+        wallet_user = await repo.get_user(session, user.id)
+    can_wallet = bool(wallet_user) and wallet_user.balance >= order.total_amount
+
     caption = _payment_caption(order, is_upgrade=False)
     await callback.message.answer_photo(
-        photo=result.qr_url, caption=caption, reply_markup=keyboards.payment_keyboard(order.id)
+        photo=result.qr_url, caption=caption,
+        reply_markup=keyboards.payment_keyboard(order.id, can_pay_wallet=can_wallet),
     )
     await callback.answer()
 
@@ -369,3 +385,166 @@ async def cb_my_orders(callback: CallbackQuery) -> None:
     text, markup = await _orders_view(callback.from_user.id)
     await callback.message.edit_text(text, reply_markup=markup)
     await callback.answer()
+
+
+# ---------------- Ví người dùng ----------------
+
+_TX_LABEL = {
+    models.TX_TOPUP: "Nạp tiền",
+    models.TX_ADMIN_CREDIT: "Admin cộng",
+    models.TX_ADMIN_DEBIT: "Admin trừ",
+    models.TX_PURCHASE: "Mua hàng",
+    models.TX_REFUND: "Hoàn tiền",
+}
+
+
+async def _wallet_text(user_id: int, username: str | None) -> tuple[str, object]:
+    async with async_session() as session:
+        user = await repo.upsert_user(session, user_id, username)
+        balance = user.balance
+        await session.commit()
+    text = (
+        "💰 <b>Ví của tôi</b>\n\n"
+        f"Số dư hiện tại: <b>{_fmt_vnd(balance)}</b>\n\n"
+        "Nạp tiền để thanh toán nhanh, không cần chuyển khoản từng đơn."
+    )
+    return text, keyboards.wallet_menu(balance)
+
+
+@router.callback_query(F.data == "menu:wallet")
+async def cb_wallet(callback: CallbackQuery) -> None:
+    text, markup = await _wallet_text(callback.from_user.id, callback.from_user.username)
+    await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "wallet:history")
+async def cb_wallet_history(callback: CallbackQuery) -> None:
+    async with async_session() as session:
+        txs = await repo.list_wallet_txs(session, callback.from_user.id, limit=15)
+    if not txs:
+        await callback.answer("Chưa có giao dịch nào.", show_alert=True)
+        return
+    lines = ["📜 <b>Lịch sử giao dịch ví</b>\n"]
+    for tx in txs:
+        sign = "➕" if tx.amount >= 0 else "➖"
+        label = _TX_LABEL.get(tx.type, tx.type)
+        status = "" if tx.status == models.TX_CONFIRMED else f" ({tx.status})"
+        lines.append(f"{sign} {_fmt_vnd(abs(tx.amount))} — {label}{status}")
+    await callback.message.edit_text("\n".join(lines), reply_markup=keyboards.wallet_menu(0))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "wallet:topup")
+async def cb_wallet_topup(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(TopUpFlow.entering_amount)
+    await callback.message.edit_text(
+        "➕ <b>Nạp tiền vào ví</b>\n\n"
+        f"Nhập số tiền muốn nạp (VND), tối thiểu {_fmt_vnd(wallet.MIN_TOPUP)}.\n"
+        "Ví dụ: <code>100000</code>",
+        reply_markup=keyboards.cancel_to_home(),
+    )
+    await callback.answer()
+
+
+@router.message(TopUpFlow.entering_amount)
+async def msg_topup_amount(message: Message, state: FSMContext) -> None:
+    raw = re.sub(r"[^\d]", "", message.text or "")
+    if not raw:
+        await message.answer("⚠️ Vui lòng nhập số tiền hợp lệ (chỉ số). Ví dụ: <code>100000</code>")
+        return
+    amount = int(raw)
+    user = message.from_user
+    try:
+        async with async_session() as session:
+            req = await wallet.request_topup(
+                session, tg_id=user.id, username=user.username, amount=amount
+            )
+    except wallet.InvalidAmount:
+        await message.answer(
+            f"⚠️ Số tiền phải từ {_fmt_vnd(wallet.MIN_TOPUP)} đến {_fmt_vnd(wallet.MAX_TOPUP)}."
+        )
+        return
+
+    await state.set_state(TopUpFlow.awaiting_topup_payment)
+    await state.update_data(topup_code=req.code)
+    caption = (
+        "💰 <b>Nạp ví</b>\n"
+        f"Số tiền: <b>{_fmt_vnd(amount)}</b>\n\n"
+        "Quét QR dưới đây để chuyển khoản.\n"
+        f"<b>Nội dung chuyển khoản phải là:</b> <code>{payment.order_note(req.code)}</code>\n\n"
+        "Sau khi chuyển, bấm <b>✅ Tôi đã chuyển khoản</b> để admin xác nhận cộng tiền."
+    )
+    await message.answer_photo(
+        photo=req.qr_url, caption=caption, reply_markup=keyboards.topup_payment_keyboard(req.code)
+    )
+
+
+@router.callback_query(F.data.startswith("topup_paid:"))
+async def cb_topup_paid(callback: CallbackQuery) -> None:
+    """Khách báo đã chuyển khoản nạp ví -> gửi admin duyệt."""
+    code = callback.data.split(":", 1)[1]
+    async with async_session() as session:
+        tx = await repo.get_wallet_tx_by_code(session, code)
+        if tx is None or tx.user_tg_id != callback.from_user.id:
+            await callback.answer("Không tìm thấy yêu cầu nạp.", show_alert=True)
+            return
+        if tx.status != models.TX_PENDING:
+            await callback.answer("Yêu cầu đã được xử lý.", show_alert=True)
+            return
+        user = await repo.get_user(session, callback.from_user.id)
+
+    await delivery.notify_admins_topup_review(callback.bot, tx, user)
+    await callback.answer(
+        "Đã gửi yêu cầu nạp tới admin. Vui lòng chờ duyệt (thường trong ít phút).",
+        show_alert=True,
+    )
+
+
+@router.callback_query(F.data.startswith("paywallet:"))
+async def cb_pay_wallet(callback: CallbackQuery, state: FSMContext) -> None:
+    """Thanh toán đơn bằng số dư ví -> giao ngay."""
+    await callback.answer("Đang xử lý...")
+    order_id = int(callback.data.split(":")[1])
+    async with async_session() as session:
+        order = await repo.get_order(session, order_id)
+        if not order or order.buyer_tg_id != callback.from_user.id:
+            await callback.answer("Không tìm thấy đơn.", show_alert=True)
+            return
+        user = await repo.get_user(session, callback.from_user.id)
+        result = await order_service.pay_with_wallet(session, order, user)
+
+    if not result.ok:
+        if result.reason == "insufficient":
+            await callback.answer("Số dư không đủ. Vui lòng nạp thêm hoặc chuyển khoản.", show_alert=True)
+        else:
+            await callback.answer("Đơn đã được xử lý hoặc hết hạn.", show_alert=True)
+        return
+
+    await state.clear()
+    try:
+        await callback.message.edit_caption(
+            caption=f"✅ Đã thanh toán đơn <code>{order.code}</code> bằng số dư ví."
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    if result.delivered:
+        await delivery.deliver(callback.bot, order, result.payloads)
+    elif result.awaiting_upgrade:
+        await delivery.notify_upgrade_pending(callback.bot, order)
+
+
+@router.callback_query(F.data.startswith("notifyme:"))
+async def cb_notify_me(callback: CallbackQuery) -> None:
+    """Đăng ký nhận thông báo khi SP có hàng trở lại."""
+    product_id = int(callback.data.split(":")[1])
+    async with async_session() as session:
+        await repo.upsert_user(session, callback.from_user.id, callback.from_user.username)
+        added = await repo.add_to_waitlist(session, callback.from_user.id, product_id)
+        await session.commit()
+    if added:
+        await callback.answer("🔔 Đã đăng ký! Bạn sẽ được nhắn ngay khi có hàng.", show_alert=True)
+    else:
+        await callback.answer("Bạn đã đăng ký nhận báo hàng sản phẩm này rồi.", show_alert=True)
+

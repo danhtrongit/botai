@@ -207,3 +207,47 @@ async def test_orders_and_sold(client):
     assert sold.status_code == 200
     rows = sold.json()["sold"]
     assert any(r["payload"] == "acc1|pw1" and r["product_name"] == "Spotify" for r in rows)
+
+
+# ---------- Users & wallet ----------
+
+async def test_users_list_and_adjust(client):
+    c, maker = client
+    headers = _auth()
+    async with maker() as session:
+        await repo.upsert_user(session, 777, "buyer")
+        await session.commit()
+
+    # List có user vừa tạo.
+    lst = await c.get("/admin/api/users", cookies=headers)
+    assert lst.status_code == 200
+    assert any(u["tg_id"] == 777 for u in lst.json()["users"])
+
+    # Cộng tiền.
+    credit = await c.post("/admin/api/users/777/adjust", json={"amount": 100000, "note": "thuong"}, cookies=headers)
+    assert credit.status_code == 200 and credit.json()["balance"] == 100000
+
+    # Trừ tiền.
+    debit = await c.post("/admin/api/users/777/adjust", json={"amount": -30000}, cookies=headers)
+    assert debit.status_code == 200 and debit.json()["balance"] == 70000
+
+    # Trừ quá số dư -> 409.
+    over = await c.post("/admin/api/users/777/adjust", json={"amount": -999999}, cookies=headers)
+    assert over.status_code == 409
+
+    # Chi tiết + lịch sử ví.
+    detail = await c.get("/admin/api/users/777", cookies=headers)
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["user"]["balance"] == 70000
+    assert len(body["txs"]) == 2
+
+
+async def test_user_adjust_zero_rejected(client):
+    c, maker = client
+    headers = _auth()
+    async with maker() as session:
+        await repo.upsert_user(session, 888, None)
+        await session.commit()
+    r = await c.post("/admin/api/users/888/adjust", json={"amount": 0}, cookies=headers)
+    assert r.status_code == 422

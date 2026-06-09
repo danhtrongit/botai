@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 from pathlib import Path
@@ -11,7 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 
 from bot.db import models, repo
 from bot.db.database import async_session
-from bot.services import webauth
+from bot.services import delivery, wallet, webauth
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,37 @@ def _stock_dict(it: models.StockItem) -> dict:
         "status": it.status,
         "order_id": it.order_id,
     }
+
+
+def _user_dict(u: models.User) -> dict:
+    return {
+        "tg_id": u.tg_id,
+        "username": u.username,
+        "balance": u.balance,
+        "created_at": str(u.created_at) if u.created_at else None,
+        "updated_at": str(u.updated_at) if u.updated_at else None,
+    }
+
+
+def _wallet_tx_dict(tx: models.WalletTx) -> dict:
+    return {
+        "id": tx.id,
+        "amount": tx.amount,
+        "type": tx.type,
+        "status": tx.status,
+        "note": tx.note or "",
+        "ref_code": tx.ref_code,
+        "balance_after": tx.balance_after,
+        "created_at": str(tx.created_at) if tx.created_at else None,
+    }
+
+
+async def _safe_send(bot: Bot, chat_id: int, text: str) -> None:
+    """Gửi tin Telegram, nuốt lỗi (user chặn bot...) để không vỡ tác vụ nền."""
+    try:
+        await bot.send_message(chat_id, text)
+    except TelegramAPIError as exc:
+        logger.info("Gửi thông báo cho user %s thất bại (bỏ qua): %s", chat_id, exc)
 
 
 def create_admin_router(bot: Bot | None = None) -> APIRouter:
@@ -233,11 +265,20 @@ def create_admin_router(bot: Bot | None = None) -> APIRouter:
         if not lines:
             raise HTTPException(status_code=422, detail="Chưa nhập tài khoản nào")
         async with async_session() as session:
-            if not await repo.get_product(session, product_id):
+            product = await repo.get_product(session, product_id)
+            if not product:
                 raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm")
             added = await repo.add_stock(session, product_id, lines, cost=cost)
+            # Lấy danh sách chờ báo hàng rồi xoá -> gửi thông báo nền (không chặn response).
+            waitlist = await repo.pop_waitlist_for_product(session, product_id)
             await session.commit()
-        return {"added": added}
+
+        notified = 0
+        if bot is not None and waitlist:
+            # Chạy nền để admin không phải đợi gửi xong hàng loạt tin.
+            asyncio.create_task(delivery.notify_restock(bot, product, waitlist))
+            notified = len(waitlist)
+        return {"added": added, "notified": notified}
 
     @router.patch("/api/stock/{item_id}")
     async def edit_stock(item_id: int, payload: dict = Body(...), admin_id: int = Depends(require_admin)):
@@ -323,6 +364,51 @@ def create_admin_router(bot: Bot | None = None) -> APIRouter:
             except TelegramAPIError as exc:
                 logger.error("Báo khách hoàn tất nâng cấp đơn %s thất bại: %s", code, exc)
         return {"ok": True, "status": status}
+
+    # ---------- Users & wallet ----------
+
+    @router.get("/api/users")
+    async def users_list(admin_id: int = Depends(require_admin)):
+        async with async_session() as session:
+            users = await repo.list_users(session, limit=300)
+        return {"users": [_user_dict(u) for u in users]}
+
+    @router.get("/api/users/{tg_id}")
+    async def user_detail(tg_id: int, admin_id: int = Depends(require_admin)):
+        async with async_session() as session:
+            user = await repo.get_user(session, tg_id)
+            if user is None:
+                raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+            txs = await repo.list_wallet_txs(session, tg_id, limit=100)
+        return {"user": _user_dict(user), "txs": [_wallet_tx_dict(t) for t in txs]}
+
+    @router.post("/api/users/{tg_id}/adjust")
+    async def user_adjust(tg_id: int, payload: dict = Body(...), admin_id: int = Depends(require_admin)):
+        """Cộng (amount>0) / trừ (amount<0) số dư ví của user."""
+        try:
+            amount = int(payload.get("amount") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Số tiền không hợp lệ")
+        if amount == 0:
+            raise HTTPException(status_code=422, detail="Số tiền phải khác 0")
+        note = (payload.get("note") or "").strip()[:500]
+        async with async_session() as session:
+            ok, user = await repo.adjust_balance(session, tg_id, amount, note=note)
+            if not ok:
+                raise HTTPException(status_code=409, detail="Số dư không đủ để trừ")
+            await session.commit()
+            balance = user.balance
+        # Báo cho user biết số dư thay đổi (nếu có bot).
+        if bot is not None:
+            verb = "cộng" if amount > 0 else "trừ"
+            text = (
+                f"🔔 Admin đã {verb} <b>{abs(amount):,}đ</b> vào ví của bạn.\n"
+                f"Số dư hiện tại: <b>{balance:,}đ</b>."
+            )
+            if note:
+                text += f"\nGhi chú: {html.escape(note)}"
+            asyncio.create_task(_safe_send(bot, tg_id, text))
+        return {"ok": True, "balance": balance}
 
     # ---------- Sold ----------
 

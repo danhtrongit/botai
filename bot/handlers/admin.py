@@ -10,7 +10,7 @@ from bot.config import get_settings
 from bot.db import models, repo
 from bot.db.database import async_session
 from bot.middlewares import AdminOnlyMiddleware
-from bot.services import delivery, webauth
+from bot.services import delivery, wallet, webauth
 from bot.services import orders as order_service
 
 logger = logging.getLogger(__name__)
@@ -107,3 +107,59 @@ async def cb_admin_reject(callback: CallbackQuery) -> None:
 
     logger.info("Admin %s từ chối đơn %s", callback.from_user.id, order.code)
     await _strip_review_buttons(callback, f"❌ Đã từ chối (bởi {callback.from_user.id}).")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("topup_ok:"))
+async def cb_topup_approve(callback: CallbackQuery) -> None:
+    """Admin Chấp nhận yêu cầu nạp ví -> cộng số dư + báo khách."""
+    await callback.answer("Đang xử lý...")
+    code = callback.data.split(":", 1)[1]
+    async with async_session() as session:
+        tx = await wallet.confirm_topup(session, code, callback.from_user.id)
+        balance = None
+        if tx is not None:
+            user = await repo.get_user(session, tx.user_tg_id)
+            balance = user.balance if user else None
+
+    if tx is None:
+        await callback.answer("Yêu cầu không còn ở trạng thái chờ (đã xử lý/hết hạn).", show_alert=True)
+        await _strip_review_buttons(callback, "⚠️ Yêu cầu nạp đã được xử lý trước đó.")
+        return
+
+    try:
+        await callback.bot.send_message(
+            tx.user_tg_id,
+            f"✅ Nạp ví thành công <b>{tx.amount:,}đ</b> (mã <code>{code}</code>).\n"
+            f"Số dư hiện tại: <b>{(balance or 0):,}đ</b>.",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Báo khách nạp ví %s thất bại: %s", code, exc)
+
+    logger.info("Admin %s duyệt nạp ví %s (+%s)", callback.from_user.id, code, tx.amount)
+    await _strip_review_buttons(callback, f"✅ Đã cộng {tx.amount:,}đ (bởi {callback.from_user.id}).")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("topup_no:"))
+async def cb_topup_reject(callback: CallbackQuery) -> None:
+    """Admin Từ chối yêu cầu nạp ví -> báo khách."""
+    await callback.answer("Đang xử lý...")
+    code = callback.data.split(":", 1)[1]
+    async with async_session() as session:
+        tx = await wallet.reject_topup(session, code)
+
+    if tx is None:
+        await callback.answer("Yêu cầu không còn ở trạng thái chờ (đã xử lý/hết hạn).", show_alert=True)
+        await _strip_review_buttons(callback, "⚠️ Yêu cầu nạp đã được xử lý trước đó.")
+        return
+
+    try:
+        await callback.bot.send_message(
+            tx.user_tg_id,
+            f"❌ Yêu cầu nạp ví <code>{code}</code> ({tx.amount:,}đ) đã bị từ chối.\n"
+            "Nếu bạn đã chuyển khoản, vui lòng liên hệ hỗ trợ để được kiểm tra lại.",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Báo khách từ chối nạp ví %s thất bại: %s", code, exc)
+
+    logger.info("Admin %s từ chối nạp ví %s", callback.from_user.id, code)
+    await _strip_review_buttons(callback, f"❌ Đã từ chối nạp (bởi {callback.from_user.id}).")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from aiogram import Bot
@@ -8,7 +9,7 @@ from aiogram.types import BufferedInputFile
 
 from bot import keyboards
 from bot.config import get_settings
-from bot.db.models import Order
+from bot.db.models import Order, Product, User, WalletTx
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,53 @@ async def notify_admins_review(bot: Bot, order: Order, *, is_upgrade: bool) -> N
             await bot.send_message(admin_id, text, reply_markup=markup)
         except TelegramAPIError as exc:
             logger.error("Gửi đơn %s cho admin %s thất bại: %s", order.code, admin_id, exc)
+
+
+async def notify_admins_topup_review(bot: Bot, tx: WalletTx, user: User) -> None:
+    """Khách báo đã chuyển khoản nạp ví -> gửi admin kèm nút Chấp nhận / Từ chối."""
+    settings = get_settings()
+    buyer = f"<code>{user.tg_id}</code>"
+    if user.username:
+        buyer += f" (@{user.username})"
+    text = (
+        "💰 <b>YÊU CẦU NẠP VÍ</b> (khách báo đã chuyển khoản)\n"
+        f"Mã nạp: <code>{tx.ref_code}</code>\n"
+        f"Số tiền: <b>{tx.amount:,}đ</b>\n"
+        f"Khách: {buyer}\n\n"
+        "Kiểm tra tài khoản nhận tiền rồi bấm <b>Chấp nhận</b> để cộng số dư, "
+        "hoặc <b>Từ chối</b> để huỷ."
+    )
+    markup = keyboards.admin_topup_keyboard(tx.ref_code)
+    for admin_id in settings.admin_ids:
+        try:
+            await bot.send_message(admin_id, text, reply_markup=markup)
+        except TelegramAPIError as exc:
+            logger.error("Gửi yêu cầu nạp %s cho admin %s thất bại: %s", tx.ref_code, admin_id, exc)
+
+
+async def notify_restock(bot: Bot, product: Product, user_ids: list[int]) -> int:
+    """Báo cho các user trong waitlist rằng SP đã có hàng. Trả số tin gửi thành công.
+
+    Gửi tuần tự có nghỉ nhẹ (~20 tin/giây) để tránh flood-limit của Telegram; bỏ qua
+    user đã chặn bot hoặc lỗi gửi.
+    """
+    if not user_ids:
+        return 0
+    text = (
+        f"🎉 <b>{product.name}</b> đã có hàng trở lại!\n"
+        f"Giá: <b>{product.price:,}đ</b>\n\n"
+        "Bấm 🛒 Mua hàng để đặt ngay kẻo hết."
+    )
+    sent = 0
+    for uid in user_ids:
+        try:
+            await bot.send_message(uid, text, reply_markup=keyboards.main_menu())
+            sent += 1
+        except TelegramAPIError as exc:
+            logger.info("Báo hàng cho user %s thất bại (bỏ qua): %s", uid, exc)
+        await asyncio.sleep(0.05)  # ~20 tin/giây
+    logger.info("Báo hàng SP %s: gửi %s/%s tin", product.id, sent, len(user_ids))
+    return sent
 
 
 async def deliver(bot: Bot, order: Order, payloads: list[str]) -> bool:

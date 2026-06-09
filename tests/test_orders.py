@@ -211,3 +211,50 @@ async def test_cancel_order_releases_stock(session):
     summary = await repo.stock_summary(session, product.id)
     assert summary[models.AVAILABLE] == 3
     assert summary[models.RESERVED] == 0
+
+
+async def test_pay_with_wallet_delivers(session):
+    product = await _seed_product(session, price=10000, stock=5)
+    created = await order_service.create_order(
+        session, buyer_tg_id=50, buyer_username="w", product_id=product.id, quantity=2
+    )
+    # Nạp đủ tiền vào ví.
+    ok, user = await repo.adjust_balance(session, 50, 100000, note="seed")
+    assert ok
+
+    result = await order_service.pay_with_wallet(session, created.order, user)
+    assert result.ok and result.delivered
+    assert len(result.payloads) == 2
+    assert created.order.status == models.DELIVERED
+    assert created.order.payment_tx_id == "wallet:50"
+    # Ví bị trừ đúng số tiền đơn.
+    user = await repo.get_user(session, 50)
+    assert user.balance == 100000 - 20000
+
+
+async def test_pay_with_wallet_insufficient(session):
+    product = await _seed_product(session, price=10000, stock=5)
+    created = await order_service.create_order(
+        session, buyer_tg_id=51, buyer_username=None, product_id=product.id, quantity=2
+    )
+    ok, user = await repo.adjust_balance(session, 51, 5000, note="seed")  # không đủ 20000
+
+    result = await order_service.pay_with_wallet(session, created.order, user)
+    assert result.ok is False
+    assert result.reason == "insufficient"
+    assert created.order.status == models.PENDING
+    user = await repo.get_user(session, 51)
+    assert user.balance == 5000  # không bị trừ
+
+
+async def test_waitlist_add_and_pop(session):
+    product = await _seed_product(session, stock=1)
+    assert await repo.add_to_waitlist(session, 60, product.id) is True
+    # Đăng ký trùng -> False.
+    assert await repo.add_to_waitlist(session, 60, product.id) is False
+    assert await repo.add_to_waitlist(session, 61, product.id) is True
+
+    ids = await repo.pop_waitlist_for_product(session, product.id)
+    assert set(ids) == {60, 61}
+    # Pop xong thì rỗng.
+    assert await repo.pop_waitlist_for_product(session, product.id) == []

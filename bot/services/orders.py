@@ -164,6 +164,41 @@ async def reject_order(session: AsyncSession, order: Order) -> bool:
     return True
 
 
+async def pay_with_wallet(session: AsyncSession, order: Order, user) -> ApprovalResult:
+    """Thanh toán đơn pending bằng số dư ví -> giao ngay, không cần admin duyệt.
+
+    Trừ ví (atomic, trong _alloc_lock để khỏi đua với luồng khác), rồi giao hàng như approve.
+    Trả ok=False kèm reason nếu đơn không còn pending hoặc không đủ số dư.
+    """
+    async with _alloc_lock:
+        if order.status != models.PENDING:
+            return ApprovalResult(ok=False, reason=f"status_{order.status}")
+        if user is None or user.balance < order.total_amount:
+            return ApprovalResult(ok=False, reason="insufficient")
+
+        charged = await repo.charge_wallet(
+            session, user, order.total_amount,
+            note=f"Mua đơn {order.code}", ref_code=order.code,
+        )
+        if not charged:
+            return ApprovalResult(ok=False, reason="insufficient")
+
+        order.payment_tx_id = f"wallet:{user.tg_id}"
+        order.paid_at = _now()
+
+        product = await repo.get_product(session, order.product_id)
+        if product is not None and product.kind == models.KIND_UPGRADE:
+            order.status = models.AWAITING_UPGRADE
+            await session.commit()
+            return ApprovalResult(ok=True, awaiting_upgrade=True)
+
+        items = await repo.mark_order_items_sold(session, order.id)
+        payloads = [item.payload for item in items]
+        order.status = models.DELIVERED
+        await session.commit()
+        return ApprovalResult(ok=True, delivered=True, payloads=payloads)
+
+
 async def expire_orders(session: AsyncSession) -> int:
     """Đổi đơn pending quá hạn -> expired và trả kho. Trả số đơn đã xử lý."""
     expired = await repo.list_expired_pending(session, _now())
