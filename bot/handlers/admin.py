@@ -53,6 +53,8 @@ async def _strip_review_buttons(callback: CallbackQuery, suffix: str) -> None:
 @router.callback_query(lambda c: c.data and c.data.startswith("adm_ok:"))
 async def cb_admin_approve(callback: CallbackQuery) -> None:
     """Admin Chấp nhận đơn -> giao hàng (account) hoặc chờ nâng cấp (upgrade)."""
+    # Ack ngay để Telegram tắt spinner (giao hàng/gửi file có thể chậm hơn 15s -> tránh treo nút).
+    await callback.answer("Đang xử lý...")
     order_id = int(callback.data.split(":")[1])
     async with async_session() as session:
         order = await repo.get_order(session, order_id)
@@ -74,12 +76,13 @@ async def cb_admin_approve(callback: CallbackQuery) -> None:
         await delivery.notify_upgrade_pending(callback.bot, order)
         logger.info("Admin %s duyệt đơn nâng cấp %s", callback.from_user.id, order.code)
         await _strip_review_buttons(callback, f"✅ Đã duyệt, chờ nâng cấp (bởi {callback.from_user.id}).")
-    await callback.answer("Đã chấp nhận đơn.")
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("adm_no:"))
 async def cb_admin_reject(callback: CallbackQuery) -> None:
     """Admin Từ chối đơn -> huỷ + trả kho + báo khách."""
+    # Ack ngay để Telegram tắt spinner trước khi báo khách (gửi tin có thể chậm).
+    await callback.answer("Đang xử lý...")
     order_id = int(callback.data.split(":")[1])
     async with async_session() as session:
         order = await repo.get_order(session, order_id)
@@ -104,4 +107,3 @@ async def cb_admin_reject(callback: CallbackQuery) -> None:
 
     logger.info("Admin %s từ chối đơn %s", callback.from_user.id, order.code)
     await _strip_review_buttons(callback, f"❌ Đã từ chối (bởi {callback.from_user.id}).")
-    await callback.answer("Đã từ chối đơn.")
