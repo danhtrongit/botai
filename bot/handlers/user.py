@@ -335,9 +335,15 @@ async def msg_enter_email(message: Message, state: FSMContext) -> None:
     await state.set_state(BuyFlow.awaiting_payment)
     await state.update_data(order_id=order.id)
 
+    # SP nâng cấp cũng có thể thanh toán bằng ví nếu đủ số dư.
+    async with async_session() as session:
+        wallet_user = await repo.get_user(session, user.id)
+    can_wallet = bool(wallet_user) and wallet_user.balance >= order.total_amount
+
     caption = _payment_caption(order, is_upgrade=True, email=email)
     await message.answer_photo(
-        photo=result.qr_url, caption=caption, reply_markup=keyboards.payment_keyboard(order.id)
+        photo=result.qr_url, caption=caption,
+        reply_markup=keyboards.payment_keyboard(order.id, can_pay_wallet=can_wallet),
     )
 
 
