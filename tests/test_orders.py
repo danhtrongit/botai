@@ -21,7 +21,10 @@ async def test_create_order_reserves_stock(session):
         session, buyer_tg_id=111, buyer_username="alice", product_id=product.id, quantity=2
     )
 
-    assert created.order.code == f"BOT{created.order.id:06d}"
+    from bot.services import payment
+
+    assert len(created.order.code) == payment.ORDER_CODE_LENGTH
+    assert all(c in payment.ORDER_CODE_ALPHABET for c in created.order.code)
     assert created.order.total_amount == 20000
     assert created.order.status == models.PENDING
     summary = await repo.stock_summary(session, product.id)
