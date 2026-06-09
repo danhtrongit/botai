@@ -3,7 +3,7 @@ import { ref, onMounted, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NCard, NSpin, NButton, NIcon, NSpace, NDescriptions, NDescriptionsItem,
-  NDataTable, NForm, NFormItem, NInputNumber, useMessage, NTag,
+  NDataTable, NForm, NFormItem, NInputNumber, useMessage, NTag, NH1, NText,
 } from 'naive-ui'
 import { ArrowBackOutline, SaveOutline } from '@vicons/ionicons5'
 import { api, fmtVnd, fmtDt } from '../api'
@@ -20,7 +20,7 @@ const cost = ref(0)
 const saving = ref(false)
 
 const itemColumns = [
-  { title: 'ID', key: 'id', width: 64, render: (r) => h('span', { style: 'color:#6b7a99' }, '#' + r.id) },
+  { title: 'ID', key: 'id', width: 64, render: (r) => h(NText, { depth: 3 }, { default: () => '#' + r.id }) },
   { title: 'Tài khoản', key: 'payload', render: (r) => h('span', { class: 'mono' }, r.payload) },
   { title: 'Giá vốn', key: 'cost', render: (r) => fmtVnd(r.cost) },
   { title: 'Trạng thái', key: 'status' },
@@ -56,7 +56,7 @@ onMounted(load)
 
 <template>
   <div>
-    <n-button text style="margin-bottom:10px;color:#6b7a99" @click="router.push('/orders')">
+    <n-button text style="margin-bottom:10px" @click="router.push('/orders')">
       <template #icon><n-icon :component="ArrowBackOutline" /></template>
       Danh sách đơn
     </n-button>
@@ -64,7 +64,7 @@ onMounted(load)
     <n-spin :show="loading">
       <template v-if="data">
         <n-space align="center" style="margin-bottom:18px">
-          <h1 class="page-title" style="margin:0">Đơn <span class="mono">{{ data.order.code }}</span></h1>
+          <n-h1 style="margin:0">Đơn <span class="mono">{{ data.order.code }}</span></n-h1>
           <component :is="statusTag(data.order.status)" />
         </n-space>
 
@@ -84,29 +84,29 @@ onMounted(load)
             <n-descriptions-item label="Tổng tiền">{{ fmtVnd(data.order.total_amount) }}</n-descriptions-item>
             <n-descriptions-item label="Giá vốn">{{ fmtVnd(data.cost) }}</n-descriptions-item>
             <n-descriptions-item label="Lợi nhuận">
-              <span :style="{ color: data.profit >= 0 ? '#22c55e' : '#f43f5e', fontWeight: 600 }">
+              <n-text :type="data.profit >= 0 ? 'success' : 'error'" strong>
                 {{ fmtVnd(data.profit) }}
-              </span>
+              </n-text>
             </n-descriptions-item>
             <n-descriptions-item label="Mã giao dịch">
               <span class="mono">{{ data.order.payment_tx_id || '—' }}</span>
             </n-descriptions-item>
             <n-descriptions-item label="Thời gian" :span="2">
-              <span style="color:#6b7a99;font-size:0.84rem">
+              <n-text depth="3" style="font-size:0.84rem">
                 Tạo: {{ fmtDt(data.order.created_at) }} · TT: {{ fmtDt(data.order.paid_at) }} · Hết hạn: {{ fmtDt(data.order.expires_at) }}
-              </span>
+              </n-text>
             </n-descriptions-item>
           </n-descriptions>
         </n-card>
 
         <!-- Đơn nâng cấp chính chủ -->
         <n-card v-if="data.is_upgrade" title="Nâng cấp chính chủ" :bordered="true">
-          <p style="margin:0 0 14px;color:#aebbd6">
+          <n-text tag="p" depth="2" style="margin:0 0 14px">
             Email khách: <span class="mono">{{ data.order.buyer_email || '—' }}</span>.
             {{ data.order.status === 'awaiting_upgrade'
               ? 'Nhập giá vốn rồi bấm hoàn tất để chuyển đơn sang đã giao.'
               : 'Cập nhật giá vốn của đơn (dùng để tính lợi nhuận).' }}
-          </p>
+          </n-text>
           <n-form>
             <n-form-item label="Giá vốn (VND)">
               <n-input-number v-model:value="cost" :min="0" :step="1000" style="max-width:280px" />

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, h, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { NCard, NDataTable, NSpace, NButton, NIcon } from 'naive-ui'
+import { NCard, NDataTable, NSpace, NButton, NIcon, NH1, NText } from 'naive-ui'
 import { api, fmtVnd, fmtDt } from '../api'
 import { statusTag, ORDER_STATUS_FILTERS } from '../status'
 
@@ -20,7 +20,7 @@ const columns = [
   { title: 'SL', key: 'quantity', width: 60 },
   { title: 'Tiền', key: 'total_amount', render: (r) => fmtVnd(r.total_amount) },
   { title: 'Trạng thái', key: 'status', render: (r) => statusTag(r.status) },
-  { title: 'Tạo lúc', key: 'created_at', render: (r) => h('span', { style: 'color:#6b7a99;font-size:0.84rem' }, fmtDt(r.created_at)) },
+  { title: 'Tạo lúc', key: 'created_at', render: (r) => h(NText, { depth: 3, style: 'font-size:0.84rem' }, { default: () => fmtDt(r.created_at) }) },
 ]
 
 function rowProps(row) {
@@ -43,8 +43,8 @@ onMounted(load)
 
 <template>
   <div>
-    <h1 class="page-title">Lịch sử đơn hàng</h1>
-    <p class="page-sub">Tối đa 200 đơn mới nhất.</p>
+    <n-h1 style="margin-top:0">Lịch sử đơn hàng</n-h1>
+    <n-text depth="3">Tối đa 200 đơn mới nhất.</n-text>
 
     <n-space style="margin-bottom:16px">
       <n-button

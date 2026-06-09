@@ -3,7 +3,7 @@ import { ref, onMounted, h } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NDataTable, NButton, NSpace, NTag, NModal, NForm, NFormItem,
-  NInput, NInputNumber, NSelect, NSwitch, NPopconfirm, NIcon, useMessage,
+  NInput, NInputNumber, NSelect, NSwitch, NPopconfirm, NIcon, useMessage, NH1, NText,
 } from 'naive-ui'
 import {
   AddOutline, CreateOutline, TrashOutline, CubeOutline, EyeOutline, EyeOffOutline,
@@ -88,7 +88,7 @@ async function remove(row) {
 }
 
 const columns = [
-  { title: 'ID', key: 'id', width: 64, render: (r) => h('span', { style: 'color:#6b7a99' }, '#' + r.id) },
+  { title: 'ID', key: 'id', width: 64, render: (r) => h(NText, { depth: 3 }, { default: () => '#' + r.id }) },
   {
     title: 'Tên', key: 'name',
     render: (r) =>
@@ -105,7 +105,7 @@ const columns = [
     title: 'Sẵn / Giữ / Bán', key: 'stock',
     render: (r) =>
       r.kind === 'upgrade'
-        ? h('span', { style: 'color:#6b7a99' }, '—')
+        ? h(NText, { depth: 3 }, { default: () => '—' })
         : `${r.stock.available} / ${r.stock.reserved} / ${r.stock.sold}`,
   },
   {
@@ -159,13 +159,13 @@ onMounted(load)
 <template>
   <div>
     <n-space justify="space-between" align="center" style="margin-bottom:8px">
-      <h1 class="page-title">Sản phẩm</h1>
+      <n-h1 style="margin:0">Sản phẩm</n-h1>
       <n-button type="primary" @click="openCreate">
         <template #icon><n-icon :component="AddOutline" /></template>
         Thêm sản phẩm
       </n-button>
     </n-space>
-    <p class="page-sub">Quản lý sản phẩm, kho và trạng thái bán.</p>
+    <n-text depth="3">Quản lý sản phẩm, kho và trạng thái bán.</n-text>
 
     <n-card :bordered="true">
       <n-data-table

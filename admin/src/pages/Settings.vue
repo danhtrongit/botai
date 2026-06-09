@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import {
-  NCard, NForm, NFormItem, NInput, NButton, NIcon, NSpace, NAlert, useMessage, NSpin,
+  NCard, NForm, NFormItem, NInput, NButton, NIcon, NSpace, NAlert, useMessage, NSpin, NH1, NText,
 } from 'naive-ui'
 import { ShieldCheckmarkOutline } from '@vicons/ionicons5'
 import { api } from '../api'
@@ -44,8 +44,8 @@ onMounted(load)
 
 <template>
   <div>
-    <h1 class="page-title">Cấu hình</h1>
-    <p class="page-sub">Kết nối MBBank để tự đối soát thanh toán.</p>
+    <n-h1 style="margin-top:0">Cấu hình</n-h1>
+    <n-text depth="3">Kết nối MBBank để tự đối soát thanh toán.</n-text>
 
     <n-spin :show="loading">
       <n-alert
@@ -64,9 +64,9 @@ onMounted(load)
       </n-alert>
 
       <n-card title="Kết nối MBBank" :bordered="true" style="max-width:560px">
-        <p style="margin:0 0 16px;color:#6b7a99;font-size:0.86rem">
+        <n-text depth="3" tag="p" style="margin:0 0 16px;font-size:0.86rem">
           TK/MK gửi qua HTTPS và được mã hoá (Fernet) trước khi lưu. Bỏ trống Số TK để tự dò.
-        </p>
+        </n-text>
         <n-form>
           <n-form-item label="Tên đăng nhập MBBank">
             <n-input v-model:value="form.username" placeholder="Tên đăng nhập" />

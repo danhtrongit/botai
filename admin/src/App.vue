@@ -2,14 +2,14 @@
 import { ref, h, onMounted, computed } from 'vue'
 import { useRouter, useRoute, RouterView } from 'vue-router'
 import {
-  NConfigProvider, NMessageProvider, NDialogProvider, darkTheme,
-  NLayout, NLayoutSider, NLayout as NLayoutContent, NMenu, NIcon, NButton, NSpin, NResult,
+  NConfigProvider, NMessageProvider, NDialogProvider,
+  NLayout, NLayoutSider, NMenu, NIcon, NButton, NSpin, NResult, NText, NSpace,
 } from 'naive-ui'
 import {
   GridOutline, CubeOutline, ReceiptOutline, CartOutline,
   SettingsOutline, LogOutOutline, RocketOutline,
 } from '@vicons/ionicons5'
-import { navyThemeOverrides } from './theme'
+import { themeOverrides } from './theme'
 import { api, setUnauthorizedHandler } from './api'
 
 const router = useRouter()
@@ -32,7 +32,7 @@ const menuOptions = [
 
 const activeKey = computed(() => {
   const p = route.path
-  if (p === '/' ) return 'dashboard'
+  if (p === '/') return 'dashboard'
   if (p.startsWith('/products')) return 'products'
   if (p.startsWith('/orders')) return 'orders'
   if (p.startsWith('/sold')) return 'sold'
@@ -68,7 +68,7 @@ const collapsed = ref(false)
 </script>
 
 <template>
-  <n-config-provider :theme="darkTheme" :theme-overrides="navyThemeOverrides">
+  <n-config-provider :theme-overrides="themeOverrides">
     <n-message-provider>
       <n-dialog-provider>
         <div v-if="checking" style="height:100vh;display:grid;place-items:center">
@@ -89,7 +89,6 @@ const collapsed = ref(false)
 
         <n-layout v-else has-sider style="height:100vh">
           <n-layout-sider
-            class="app-sider"
             bordered
             collapse-mode="width"
             :collapsed-width="64"
@@ -99,13 +98,10 @@ const collapsed = ref(false)
             @collapse="collapsed = true"
             @expand="collapsed = false"
           >
-            <div class="brand">
-              <span class="brand-mark"><n-icon size="22" :component="CartOutline" /></span>
-              <div v-if="!collapsed">
-                <div class="brand-text">NCP Admin</div>
-                <div class="brand-sub">Navy Control</div>
-              </div>
-            </div>
+            <n-space align="center" :wrap="false" style="padding:20px">
+              <n-icon size="24" color="#3b82f6" :component="CartOutline" />
+              <n-text v-if="!collapsed" strong style="font-size:1.1rem">NCP Admin</n-text>
+            </n-space>
             <n-menu
               :value="activeKey"
               :options="menuOptions"

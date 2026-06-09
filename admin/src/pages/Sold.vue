@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, h } from 'vue'
 import { useRouter } from 'vue-router'
-import { NCard, NDataTable } from 'naive-ui'
+import { NCard, NDataTable, NButton, NH1, NText } from 'naive-ui'
 import { api, fmtVnd, fmtDt } from '../api'
 
 const router = useRouter()
@@ -13,18 +13,18 @@ const columns = [
   { title: 'Tài khoản đã giao', key: 'payload', render: (r) => h('span', { class: 'mono' }, r.payload) },
   {
     title: 'Đơn', key: 'order_code',
-    render: (r) => h('a', {
-      class: 'mono', style: 'color:#60a5fa;cursor:pointer',
+    render: (r) => h(NButton, {
+      text: true, type: 'primary', class: 'mono',
       onClick: () => router.push(`/orders/${r.order_id}`),
-    }, r.order_code),
+    }, { default: () => r.order_code }),
   },
   { title: 'Giá bán', key: 'unit_sale', render: (r) => fmtVnd(r.unit_sale) },
-  { title: 'Giá vốn', key: 'cost', render: (r) => h('span', { style: 'color:#aebbd6' }, fmtVnd(r.cost)) },
+  { title: 'Giá vốn', key: 'cost', render: (r) => h(NText, { depth: 3 }, { default: () => fmtVnd(r.cost) }) },
   {
     title: 'Lợi nhuận', key: 'profit',
-    render: (r) => h('span', { style: { color: r.profit >= 0 ? '#22c55e' : '#f43f5e', fontWeight: 600 } }, fmtVnd(r.profit)),
+    render: (r) => h(NText, { type: r.profit >= 0 ? 'success' : 'error', strong: true }, { default: () => fmtVnd(r.profit) }),
   },
-  { title: 'Bán lúc', key: 'paid_at', render: (r) => h('span', { style: 'color:#6b7a99;font-size:0.84rem' }, fmtDt(r.paid_at)) },
+  { title: 'Bán lúc', key: 'paid_at', render: (r) => h(NText, { depth: 3, style: 'font-size:0.84rem' }, { default: () => fmtDt(r.paid_at) }) },
 ]
 
 onMounted(async () => {
@@ -39,8 +39,8 @@ onMounted(async () => {
 
 <template>
   <div>
-    <h1 class="page-title">Tài khoản đã bán</h1>
-    <p class="page-sub">Tối đa 300 mục mới nhất · Giá bán = tiền đơn ÷ số lượng.</p>
+    <n-h1 style="margin-top:0">Tài khoản đã bán</n-h1>
+    <n-text depth="3">Tối đa 300 mục mới nhất · Giá bán = tiền đơn ÷ số lượng.</n-text>
 
     <n-card :bordered="true">
       <n-data-table :columns="columns" :data="sold" :loading="loading" :bordered="false" :max-height="600" />

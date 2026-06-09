@@ -3,7 +3,7 @@ import { ref, onMounted, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NCard, NDataTable, NButton, NSpace, NTag, NModal, NForm, NFormItem,
-  NInput, NInputNumber, NSelect, NPopconfirm, NIcon, NSpin, useMessage, NStatistic, NGrid, NGi,
+  NInput, NInputNumber, NSelect, NPopconfirm, NIcon, NSpin, useMessage, NStatistic, NGrid, NGi, NH1, NText,
 } from 'naive-ui'
 import { AddOutline, CreateOutline, TrashOutline, ArrowBackOutline } from '@vicons/ionicons5'
 import { api, fmtVnd } from '../api'
@@ -96,7 +96,7 @@ const STATUS_TAG = {
 }
 
 const columns = [
-  { title: 'ID', key: 'id', width: 64, render: (r) => h('span', { style: 'color:#6b7a99' }, '#' + r.id) },
+  { title: 'ID', key: 'id', width: 64, render: (r) => h(NText, { depth: 3 }, { default: () => '#' + r.id }) },
   { title: 'Tài khoản', key: 'payload', render: (r) => h('span', { class: 'mono' }, r.payload) },
   { title: 'Giá vốn', key: 'cost', render: (r) => fmtVnd(r.cost) },
   {
@@ -110,8 +110,8 @@ const columns = [
     title: 'Đơn', key: 'order_id', width: 80,
     render: (r) =>
       r.order_id
-        ? h('a', { class: 'mono', style: 'color:#60a5fa;cursor:pointer', onClick: () => router.push(`/orders/${r.order_id}`) }, '#' + r.order_id)
-        : h('span', { style: 'color:#6b7a99' }, '—'),
+        ? h(NButton, { text: true, type: 'primary', class: 'mono', onClick: () => router.push(`/orders/${r.order_id}`) }, { default: () => '#' + r.order_id })
+        : h(NText, { depth: 3 }, { default: () => '—' }),
   },
   {
     title: '', key: 'actions', width: 110,
@@ -148,7 +148,7 @@ onMounted(load)
 
 <template>
   <div>
-    <n-button text style="margin-bottom:10px;color:#6b7a99" @click="router.push('/products')">
+    <n-button text style="margin-bottom:10px" @click="router.push('/products')">
       <template #icon><n-icon :component="ArrowBackOutline" /></template>
       Sản phẩm
     </n-button>
@@ -156,7 +156,7 @@ onMounted(load)
     <n-spin :show="loading">
       <template v-if="product">
         <n-space justify="space-between" align="center" style="margin-bottom:8px">
-          <h1 class="page-title">Kho — {{ product.name }}</h1>
+          <n-h1 style="margin:0">Kho — {{ product.name }}</n-h1>
           <n-button type="primary" @click="showAdd = true">
             <template #icon><n-icon :component="AddOutline" /></template>
             Nạp tài khoản
@@ -171,9 +171,9 @@ onMounted(load)
 
         <n-card :bordered="true">
           <n-data-table :columns="columns" :data="items" :bordered="false" :max-height="520" />
-          <p style="color:#6b7a99;font-size:0.82rem;margin:10px 0 0">
+          <n-text depth="3" tag="p" style="font-size:0.82rem;margin:10px 0 0">
             Tối đa 500 mục mới nhất · đổi trạng thái về "Còn" sẽ gỡ gắn đơn.
-          </p>
+          </n-text>
         </n-card>
       </template>
     </n-spin>

@@ -2,9 +2,8 @@
 import { ref, onMounted, h } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  NGrid, NGi, NCard, NDataTable, NTag, NSpin, NSpace, NIcon, NAlert, NText,
+  NGrid, NGi, NCard, NStatistic, NDataTable, NSpin, NAlert, NH1, NText,
 } from 'naive-ui'
-import { CheckmarkCircleOutline, AlertCircleOutline } from '@vicons/ionicons5'
 import { api, fmtVnd } from '../api'
 import { statusTag } from '../status'
 
@@ -41,53 +40,34 @@ onMounted(async () => {
 
 <template>
   <div>
-    <h1 class="page-title">Tổng quan</h1>
-    <p class="page-sub">Doanh thu, lợi nhuận và tình trạng hệ thống.</p>
+    <n-h1 style="margin-top:0">Tổng quan</n-h1>
+    <n-text depth="3">Doanh thu, lợi nhuận và tình trạng hệ thống.</n-text>
 
     <n-spin :show="loading">
       <template v-if="data">
-        <div class="stat-grid" style="margin-bottom:22px">
-          <n-card class="stat-card" :bordered="true">
-            <div class="stat-label">Doanh thu</div>
-            <div class="stat-num">{{ fmtVnd(data.stats.revenue) }}</div>
-          </n-card>
-          <n-card class="stat-card" :bordered="true">
-            <div class="stat-label">Giá vốn</div>
-            <div class="stat-num" style="color:#aebbd6">{{ fmtVnd(data.stats.cost) }}</div>
-          </n-card>
-          <n-card class="stat-card" :bordered="true">
-            <div class="stat-label">Lợi nhuận</div>
-            <div class="stat-num" style="color:#22c55e">{{ fmtVnd(data.stats.profit) }}</div>
-          </n-card>
-          <n-card class="stat-card" :bordered="true">
-            <div class="stat-label">Đơn đã giao</div>
-            <div class="stat-num">{{ data.stats.delivered }}</div>
-          </n-card>
-        </div>
+        <n-grid cols="2 s:4" responsive="screen" :x-gap="16" :y-gap="16" style="margin:20px 0">
+          <n-gi><n-card><n-statistic label="Doanh thu" :value="fmtVnd(data.stats.revenue)" /></n-card></n-gi>
+          <n-gi><n-card><n-statistic label="Giá vốn" :value="fmtVnd(data.stats.cost)" /></n-card></n-gi>
+          <n-gi><n-card><n-statistic label="Lợi nhuận" :value="fmtVnd(data.stats.profit)" /></n-card></n-gi>
+          <n-gi><n-card><n-statistic label="Đơn đã giao" :value="data.stats.delivered" /></n-card></n-gi>
+        </n-grid>
 
         <n-alert
           v-if="data.mbbank.configured"
-          type="success" :bordered="true" style="margin-bottom:22px"
-          title="MBBank đã kết nối"
+          type="success" style="margin-bottom:20px" title="MBBank đã kết nối"
         >
           Đang quét giao dịch tự động · user
           <span class="mono">{{ data.mbbank.username_masked }}</span>
           · TK <span class="mono">{{ data.mbbank.account_no || 'tự dò' }}</span>
         </n-alert>
         <n-alert
-          v-else type="warning" :bordered="true" style="margin-bottom:22px"
-          title="Chưa cấu hình MBBank"
+          v-else type="warning" style="margin-bottom:20px" title="Chưa cấu hình MBBank"
         >
           Bot chưa thể tự đối soát. Vào <b>Cấu hình</b> để nhập TK/MK MBBank.
         </n-alert>
 
-        <n-card title="Đơn gần đây" :bordered="true">
-          <n-data-table
-            :columns="orderColumns"
-            :data="data.recent_orders"
-            :row-props="rowProps"
-            :bordered="false"
-          />
+        <n-card title="Đơn gần đây">
+          <n-data-table :columns="orderColumns" :data="data.recent_orders" :row-props="rowProps" />
         </n-card>
       </template>
     </n-spin>
