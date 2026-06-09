@@ -21,7 +21,22 @@ def test_build_qr_url_vietqr():
     url = payment.build_qr_url(100000, "K7QXM4P9RT")
     assert url.startswith("https://img.vietqr.io/image/MB-0123456789-")
     assert "amount=100000" in url
-    assert "addInfo=K7QXM4P9RT" in url
+    # addInfo = lời nhắn + mã (mã vẫn xuất hiện nguyên vẹn trong nội dung).
+    assert "K7QXM4P9RT" in url
+    assert "addInfo=" in url
+
+
+def test_order_note_friendly_and_stable():
+    code = "K7QXM4P9RT"
+    note = payment.order_note(code)
+    # Có chứa mã đơn nguyên vẹn.
+    assert code in note
+    # Bắt đầu bằng một lời nhắn trong danh sách.
+    assert any(note.startswith(p + " ") for p in payment.ORDER_NOTE_PREFIXES)
+    # Ổn định: cùng mã -> cùng lời nhắn.
+    assert payment.order_note(code) == note
+    # Sau khi chuẩn hoá vẫn match được mã đơn (đối soát không đổi).
+    assert payment.match_order_code([code], note) == code
 
 
 def test_normalize_ref_joins_split_chars():

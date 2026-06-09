@@ -12,6 +12,7 @@ from bot.config import get_settings
 from bot.db import models, repo
 from bot.db.database import async_session
 from bot.services import orders as order_service
+from bot.services import payment
 from bot.states import BuyFlow
 
 router = Router(name="user")
@@ -57,7 +58,7 @@ def _payment_caption(order, *, is_upgrade: bool, email: str | None = None) -> st
         f"{head}"
         f"Số tiền: <b>{_fmt_vnd(order.total_amount)}</b>\n\n"
         f"Vui lòng chuyển khoản theo QR dưới đây.\n"
-        f"<b>Nội dung chuyển khoản phải là:</b> <code>{order.code}</code>\n\n"
+        f"<b>Nội dung chuyển khoản phải là:</b> <code>{payment.order_note(order.code)}</code>\n\n"
         f"{tail_action}"
     )
 

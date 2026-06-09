@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import secrets
 from urllib.parse import urlencode
@@ -10,6 +11,20 @@ from bot.config import get_settings
 # nội dung chuyển khoản không bị sai.
 ORDER_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 ORDER_CODE_LENGTH = 10
+
+# Lời nhắn thân thiện ghép trước mã đơn cho nội dung CK trông tự nhiên (không dấu để
+# tránh ngân hàng bỏ dấu). Chỉ mang tính trang trí — mã đơn vẫn nằm trong nội dung nên
+# đối soát không đổi.
+ORDER_NOTE_PREFIXES = (
+    "gui cafe",
+    "gui uong nuoc",
+    "gui ly tra sua",
+    "gui ban cafe",
+    "ung ho cafe",
+    "gui chut cafe",
+    "cam on shop",
+    "gui banh mi",
+)
 
 # Mọi ký tự không phải chữ/số đều bị loại khi chuẩn hoá (dùng để "nối lại" chuỗi bị tách).
 _NON_ALNUM_RE = re.compile(r"[^A-Z0-9]")
@@ -27,6 +42,18 @@ def generate_order_code(length: int = ORDER_CODE_LENGTH) -> str:
     return "".join(secrets.choice(ORDER_CODE_ALPHABET) for _ in range(length))
 
 
+def order_note(code: str) -> str:
+    """Nội dung chuyển khoản thân thiện: "<lời nhắn> <mã đơn>" (vd "gui cafe K7QXM4P9RT").
+
+    Lời nhắn chọn ổn định theo mã (cùng mã -> cùng lời nhắn) để QR, tin nhắn hướng dẫn
+    và nội dung khách gõ luôn trùng nhau. Mã đơn vẫn xuất hiện nguyên vẹn nên đối soát
+    (match_order_code) không bị ảnh hưởng.
+    """
+    digest = int(hashlib.md5(code.encode("utf-8")).hexdigest(), 16)
+    prefix = ORDER_NOTE_PREFIXES[digest % len(ORDER_NOTE_PREFIXES)]
+    return f"{prefix} {code}"
+
+
 def normalize_ref(text: str | None) -> str:
     """Chuẩn hoá nội dung chuyển khoản: viết HOA + bỏ mọi ký tự không phải chữ/số.
 
@@ -37,10 +64,10 @@ def normalize_ref(text: str | None) -> str:
 
 
 def build_qr_url(amount: int, code: str) -> str:
-    """Sinh URL ảnh QR VietQR kèm số tiền + nội dung là mã đơn."""
+    """Sinh URL ảnh QR VietQR kèm số tiền + nội dung là lời nhắn thân thiện + mã đơn."""
     settings = get_settings()
     base = f"https://img.vietqr.io/image/{settings.bank_code}-{settings.bank_account}-{VIETQR_TEMPLATE}.png"
-    params = {"amount": amount, "addInfo": code}
+    params = {"amount": amount, "addInfo": order_note(code)}
     if settings.bank_account_name:
         params["accountName"] = settings.bank_account_name
     return f"{base}?{urlencode(params)}"
