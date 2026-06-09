@@ -81,6 +81,22 @@ async def test_process_delivers_and_idempotent(maker):
     assert bot.send_document.await_count == 1
 
 
+async def test_process_delivers_when_code_split_by_bank(maker):
+    """Ngân hàng tự chèn khoảng trắng vào mã đơn -> vẫn đối soát & giao đúng."""
+    code, order_id = await _seed_order(maker)
+    bot = AsyncMock()
+    # Chèn khoảng trắng vào giữa mã (vd "ABCDEFGHIJ" -> "ABCD EFGHIJ").
+    split_code = code[:4] + " " + code[4:]
+    txns = [_tx(f"NGUYEN VAN A {split_code} chuyen tien", ref="FTSPLIT")]
+
+    n = await poll.process_transactions(bot, txns)
+    assert n == 1
+    async with maker() as session:
+        order = await repo.get_order(session, order_id)
+        assert order.status == models.DELIVERED
+        assert order.payment_tx_id == "FTSPLIT"
+
+
 async def test_process_ignores_debit_and_unknown(maker):
     code, order_id = await _seed_order(maker)
     bot = AsyncMock()

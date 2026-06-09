@@ -20,6 +20,16 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+async def _unique_order_code(session: AsyncSession, max_tries: int = 12) -> str:
+    """Sinh mã đơn ngẫu nhiên chưa tồn tại trong DB (thử lại nếu trùng)."""
+    for _ in range(max_tries):
+        code = payment.generate_order_code()
+        if await repo.get_order_by_code(session, code) is None:
+            return code
+    # Cực hiếm khi tới đây; nới dài thêm để chắc chắn không trùng.
+    return payment.generate_order_code(payment.ORDER_CODE_LENGTH + 4)
+
+
 class OutOfStock(Exception):
     def __init__(self, available: int):
         self.available = available
@@ -67,7 +77,7 @@ async def create_order(
         total_amount = product.price * quantity
         expires_at = _now() + timedelta(minutes=settings.order_expiry_minutes)
 
-        # Tạo đơn trước để lấy id -> sinh mã đơn ổn định, rồi reserve kho theo order_id.
+        # Tạo đơn trước để lấy id, sau đó gán mã ngẫu nhiên duy nhất rồi reserve kho.
         order = await repo.create_order(
             session,
             code="PENDING",  # tạm; cập nhật ngay sau khi có id
@@ -79,7 +89,7 @@ async def create_order(
             total_amount=total_amount,
             expires_at=expires_at,
         )
-        order.code = payment.build_order_code(order.id)
+        order.code = await _unique_order_code(session)
 
         if not is_upgrade:
             reserved = await repo.reserve_items(session, product_id, quantity, order.id)

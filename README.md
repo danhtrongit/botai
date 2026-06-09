@@ -1,7 +1,7 @@
 # Bot bán tài khoản digital + tự đối soát MBBank
 
 Bot Telegram (aiogram) bán tài khoản digital theo luồng **Chọn sản phẩm → Chọn số lượng → Thanh toán QR**.
-Hệ thống **tự sinh mã đơn (BOT…)** và **tự đối soát**: bot định kỳ đăng nhập MBBank (thư viện `mbbank-lib`), quét lịch sử giao dịch; khi thấy tiền vào khớp mã đơn → **tự động giao tài khoản** (mỗi tài khoản là 1 dòng text trong kho) cho khách. **Không dùng webhook.**
+Hệ thống **tự sinh mã đơn ngẫu nhiên** (chuỗi chữ HOA + số, bỏ ký tự dễ nhầm) và **tự đối soát**: bot định kỳ đăng nhập MBBank (thư viện `mbbank-lib`), quét lịch sử giao dịch; khi thấy tiền vào khớp mã đơn → **tự động giao tài khoản** (mỗi tài khoản là 1 dòng text trong kho) cho khách. Khi đối soát, nội dung CK được **chuẩn hoá (gộp lại ký tự bị ngân hàng tách)** trước khi so khớp, nên mã bị chèn khoảng trắng vẫn nhận đúng. **Không dùng webhook.**
 
 ## Tính năng
 - Luồng mua hàng bằng nút bấm (inline keyboard) theo sản phẩm/số lượng.
@@ -55,7 +55,16 @@ Lệnh trên chạy đồng thời: bot (long-polling) + web server (uvicorn) + 
 3. Bot bắt đầu quét giao dịch và tự giao hàng khi nhận đủ tiền.
 
 ## Quản trị (web)
-Bot chỉ còn **1 lệnh admin duy nhất: `/login`**. Mọi thao tác quản trị thực hiện trên trang web.
+Trang quản trị là **SPA (Vite + Vue 3 + Naive UI, theme navy đậm)** trong thư mục `admin/`, phục vụ dưới `/admin/`. Backend cung cấp **JSON API** dưới `/admin/api`. Bot chỉ còn **1 lệnh admin duy nhất: `/login`**.
+
+### Build admin SPA (bắt buộc trước khi chạy/deploy)
+```bash
+cd admin
+npm install
+npm run build   # xuất ra admin/dist (FastAPI tự phục vụ)
+```
+Dev nóng (tuỳ chọn): `npm run dev` (proxy `/admin/api` + `/admin/auth` về `127.0.0.1:8000`).
+
 
 1. Trong Telegram gửi `/login` → bot trả về link `…/admin/auth?token=…` (hết hạn sau 1 giờ, chỉ admin trong `ADMIN_IDS` mới lấy được).
 2. Mở link → trang web set cookie phiên (7 ngày) → vào trang quản trị tại `…/admin`.
@@ -76,7 +85,7 @@ Bộ test bao phủ: sinh/đối soát mã đơn, QR VietQR, cấp phát kho, id
 - App chạy systemd service `botai` ở `127.0.0.1:8090` (`/opt/botai`, venv riêng).
 - Nginx (BT) thêm vhost reverse-proxy `ncp.danhtrong.online` → `127.0.0.1:8090`, SSL Let's Encrypt (certbot webroot).
 - Quản lý: `systemctl {status|restart} botai`, log: `journalctl -u botai -f`.
-- Cập nhật code: `rsync` lên `/opt/botai` rồi `systemctl restart botai`.
+- Cập nhật code: **build admin SPA trước** (`cd admin && npm run build`), `rsync` lên `/opt/botai` (kèm `admin/dist`) rồi `systemctl restart botai`. `admin/dist` không commit vào git mà build khi deploy.
 
 ## Cấu trúc
 ```

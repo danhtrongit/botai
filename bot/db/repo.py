@@ -300,6 +300,12 @@ async def count_pending_orders(session: AsyncSession) -> int:
     return int((await session.scalar(stmt)) or 0)
 
 
+async def list_pending_order_codes(session: AsyncSession) -> list[str]:
+    """Danh sách mã đơn đang chờ thanh toán — dùng làm ứng viên khi đối soát giao dịch."""
+    stmt = select(Order.code).where(Order.status == models.PENDING)
+    return list((await session.scalars(stmt)).all())
+
+
 async def complete_upgrade(session: AsyncSession, order: Order, cost: int | None = None) -> bool:
     """Admin xác nhận đã nâng cấp xong đơn awaiting_upgrade -> delivered (kèm giá vốn nếu có)."""
     if order.status != models.AWAITING_UPGRADE:

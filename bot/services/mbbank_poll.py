@@ -87,7 +87,11 @@ async def process_transactions(bot: Bot, txns: list[dict]) -> int:
             if await repo.get_order_by_payment_tx(session, ref) is not None:
                 continue
 
-            code = payment.extract_order_code(tx.get("description"), tx.get("addDescription"))
+            # Lấy danh sách mã đơn đang chờ rồi so khớp (chịu được nội dung CK bị tách ký tự).
+            pending_codes = await repo.list_pending_order_codes(session)
+            code = payment.match_order_code(
+                pending_codes, tx.get("description"), tx.get("addDescription")
+            )
             if not code:
                 continue
 

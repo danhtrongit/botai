@@ -33,23 +33,35 @@ async def client(monkeypatch):
     await engine.dispose()
 
 
-async def test_dashboard_requires_login(client):
+def _auth(cookie=None):
+    return {webauth.COOKIE_NAME: cookie or webauth.make_token(1)}  # ADMIN_IDS=1 trong conftest
+
+
+# ---------- Auth ----------
+
+async def test_api_requires_login(client):
     c, _ = client
-    resp = await c.get("/admin")
+    resp = await c.get("/admin/api/overview")
     assert resp.status_code == 401
 
 
-async def test_auth_sets_cookie_and_dashboard_loads(client):
+async def test_auth_sets_cookie(client):
     c, _ = client
-    token = webauth.make_token(1)  # ADMIN_IDS trong conftest = "1"
+    token = webauth.make_token(1)
     resp = await c.get(f"/admin/auth?token={token}")
     assert resp.status_code == 303
-    cookie = resp.cookies.get(webauth.COOKIE_NAME)
-    assert cookie
+    assert resp.cookies.get(webauth.COOKIE_NAME)
 
-    dash = await c.get("/admin", cookies={webauth.COOKIE_NAME: cookie})
-    assert dash.status_code == 200
-    assert "Tổng quan" in dash.text
+
+async def test_session_and_overview(client):
+    c, _ = client
+    s = await c.get("/admin/api/session", cookies=_auth())
+    assert s.status_code == 200 and s.json()["authenticated"] is True
+
+    ov = await c.get("/admin/api/overview", cookies=_auth())
+    assert ov.status_code == 200
+    body = ov.json()
+    assert "stats" in body and "recent_orders" in body and "mbbank" in body
 
 
 async def test_bad_token_rejected(client):
@@ -58,135 +70,83 @@ async def test_bad_token_rejected(client):
     assert resp.status_code == 401
 
 
-async def test_add_product_and_stock(client):
+# ---------- Products & stock ----------
+
+async def test_product_crud_and_stock(client):
     c, maker = client
-    cookie = webauth.make_token(1)
+    headers = _auth()
 
-    r1 = await c.post(
-        "/admin/products",
-        data={"name": "Netflix", "price": "10000", "description": "1 thang"},
-        cookies={webauth.COOKIE_NAME: cookie},
-    )
-    assert r1.status_code == 303
+    # create
+    r = await c.post("/admin/api/products", json={"name": "Netflix", "price": 10000, "description": "1 thang"}, cookies=headers)
+    assert r.status_code == 200
+    pid = r.json()["product"]["id"]
 
-    async with maker() as session:
-        products = await repo.list_products(session, only_active=False)
-        assert len(products) == 1
-        pid = products[0].id
+    # list
+    lst = await c.get("/admin/api/products", cookies=headers)
+    assert lst.status_code == 200 and len(lst.json()["products"]) == 1
 
-    r2 = await c.post(
-        "/admin/stock",
-        data={"product_id": str(pid), "items": "u1|p1\nu2|p2\n\nu3|p3", "cost": "5000"},
-        cookies={webauth.COOKIE_NAME: cookie},
-    )
-    assert r2.status_code == 303
-
-    async with maker() as session:
-        assert await repo.count_available(session, pid) == 3
-        items = await repo.list_stock_items(session, pid)
-        assert all(it.cost == 5000 for it in items)  # cả lô chung giá vốn
-
-
-async def test_edit_product(client):
-    c, maker = client
-    cookie = webauth.make_token(1)
-    async with maker() as session:
-        p = await repo.create_product(session, name="Old", price=1000, description="x")
-        await session.commit()
-        pid = p.id
-
-    # form sửa hiển thị giá trị hiện tại
-    form = await c.get(f"/admin/products/{pid}/edit", cookies={webauth.COOKIE_NAME: cookie})
-    assert form.status_code == 200
-    assert "Old" in form.text
-
-    r = await c.post(
-        f"/admin/products/{pid}/edit",
-        data={"name": "New Name", "price": "25000", "description": "mô tả mới", "is_active": "0"},
-        cookies={webauth.COOKIE_NAME: cookie},
-    )
-    assert r.status_code == 303
+    # update
+    up = await c.patch(f"/admin/api/products/{pid}", json={"name": "New Name", "price": 25000, "is_active": False}, cookies=headers)
+    assert up.status_code == 200
     async with maker() as session:
         p = await repo.get_product(session, pid)
-        assert p.name == "New Name"
-        assert p.price == 25000
-        assert p.is_active is False
+        assert p.name == "New Name" and p.price == 25000 and p.is_active is False
+
+    # toggle
+    tg = await c.post(f"/admin/api/products/{pid}/toggle", cookies=headers)
+    assert tg.status_code == 200 and tg.json()["product"]["is_active"] is True
+
+    # add stock
+    st = await c.post("/admin/api/stock", json={"product_id": pid, "items": "u1|p1\nu2|p2\n\nu3|p3", "cost": 5000}, cookies=headers)
+    assert st.status_code == 200 and st.json()["added"] == 3
+    async with maker() as session:
+        assert await repo.count_available(session, pid) == 3
+
+    # stock list + edit + delete
+    sl = await c.get(f"/admin/api/products/{pid}/stock", cookies=headers)
+    assert sl.status_code == 200
+    items = sl.json()["items"]
+    eid = items[0]["id"]
+    ed = await c.patch(f"/admin/api/stock/{eid}", json={"payload": "new|pw", "status": "sold", "cost": 1}, cookies=headers)
+    assert ed.status_code == 200 and ed.json()["item"]["payload"] == "new|pw"
+    dl = await c.delete(f"/admin/api/stock/{eid}", cookies=headers)
+    assert dl.status_code == 200
+    async with maker() as session:
+        assert await repo.get_stock_item(session, eid) is None
 
 
-async def test_delete_product(client):
+async def test_delete_product_blocked_when_has_orders(client):
     c, maker = client
-    cookie = webauth.make_token(1)
+    headers = _auth()
     async with maker() as session:
         p1 = await repo.create_product(session, name="Free delete", price=1000)
         p2 = await repo.create_product(session, name="Has order", price=2000)
         await session.flush()
         await repo.add_stock(session, p2.id, ["a|b"])
         await session.commit()
-        # p2 có đơn -> không được xoá
-        created = await order_service.create_order(
+        await order_service.create_order(
             session, buyer_tg_id=1, buyer_username=None, product_id=p2.id, quantity=1
         )
         pid1, pid2 = p1.id, p2.id
-        assert created  # noqa
 
-    headers = {webauth.COOKIE_NAME: cookie}
-    r1 = await c.post(f"/admin/products/{pid1}/delete", cookies=headers)
-    assert r1.status_code == 303
-    r2 = await c.post(f"/admin/products/{pid2}/delete", cookies=headers)
-    assert r2.status_code == 303
+    r1 = await c.delete(f"/admin/api/products/{pid1}", cookies=headers)
+    assert r1.status_code == 200
+    r2 = await c.delete(f"/admin/api/products/{pid2}", cookies=headers)
+    assert r2.status_code == 409  # bị chặn vì có đơn
 
     async with maker() as session:
-        assert await repo.get_product(session, pid1) is None      # đã xoá
-        assert await repo.get_product(session, pid2) is not None  # bị chặn vì có đơn
+        assert await repo.get_product(session, pid1) is None
+        assert await repo.get_product(session, pid2) is not None
 
 
-async def test_stock_edit_and_delete(client):
+# ---------- Upgrade flow ----------
+
+async def test_upgrade_product_and_complete(client):
     c, maker = client
-    cookie = webauth.make_token(1)
-    headers = {webauth.COOKIE_NAME: cookie}
-    async with maker() as session:
-        p = await repo.create_product(session, name="Disney", price=3000)
-        await session.flush()
-        await repo.add_stock(session, p.id, ["old|pw", "del|me"])
-        await session.commit()
-        items = await repo.list_stock_items(session, p.id)
-        pid = p.id
-        edit_id = items[-1].id   # "old|pw"
-        del_id = items[0].id     # "del|me"
+    headers = _auth()
 
-    # trang kho hiển thị tài khoản
-    page = await c.get(f"/admin/products/{pid}/stock", cookies=headers)
-    assert page.status_code == 200 and "old|pw" in page.text
-
-    # sửa payload + đổi trạng thái sang sold
-    r = await c.post(
-        f"/admin/stock/{edit_id}/edit",
-        data={"payload": "new|pw", "status": "sold"}, cookies=headers,
-    )
-    assert r.status_code == 303
-    async with maker() as session:
-        it = await repo.get_stock_item(session, edit_id)
-        assert it.payload == "new|pw" and it.status == models.SOLD
-
-    # xoá 1 tài khoản
-    r2 = await c.post(f"/admin/stock/{del_id}/delete", cookies=headers)
-    assert r2.status_code == 303
-    async with maker() as session:
-        assert await repo.get_stock_item(session, del_id) is None
-
-
-async def test_add_upgrade_product_and_admin_flow(client):
-    c, maker = client
-    cookie = webauth.make_token(1)
-    headers = {webauth.COOKIE_NAME: cookie}
-
-    # thêm SP loại nâng cấp qua web (kèm field kind)
-    r = await c.post(
-        "/admin/products",
-        data={"name": "Up Spotify", "price": "50000", "kind": "upgrade"},
-        cookies=headers,
-    )
-    assert r.status_code == 303
+    r = await c.post("/admin/api/products", json={"name": "Up Spotify", "price": 50000, "kind": "upgrade"}, cookies=headers)
+    assert r.status_code == 200
 
     async with maker() as session:
         prod = (await repo.list_products(session, only_active=False))[0]
@@ -195,41 +155,33 @@ async def test_add_upgrade_product_and_admin_flow(client):
             session, buyer_tg_id=7, buyer_username=None, product_id=prod.id,
             quantity=1, buyer_email="me@mail.com",
         )
-        await order_service.confirm_payment(
-            session, created.order, payment_tx_id="FTUP", transfer_amount=50000
-        )
+        await order_service.confirm_payment(session, created.order, payment_tx_id="FTUP", transfer_amount=50000)
         oid = created.order.id
         assert created.order.status == models.AWAITING_UPGRADE
 
-    # trang chi tiết hiện email + nút hoàn tất nâng cấp
-    detail = await c.get(f"/admin/orders/{oid}", cookies=headers)
+    detail = await c.get(f"/admin/api/orders/{oid}", cookies=headers)
     assert detail.status_code == 200
-    assert "me@mail.com" in detail.text
-    assert "Hoàn tất nâng cấp" in detail.text
+    body = detail.json()
+    assert body["is_upgrade"] is True and body["order"]["buyer_email"] == "me@mail.com"
 
-    # bấm hoàn tất kèm giá vốn -> đơn chuyển delivered + lưu cost
-    done = await c.post(
-        f"/admin/orders/{oid}/complete-upgrade", data={"cost": "12000"}, cookies=headers
-    )
-    assert done.status_code == 303
+    done = await c.post(f"/admin/api/orders/{oid}/complete-upgrade", json={"cost": 12000}, cookies=headers)
+    assert done.status_code == 200
     async with maker() as session:
         o = await repo.get_order(session, oid)
-        assert o.status == models.DELIVERED
-        assert o.cost == 12000
+        assert o.status == models.DELIVERED and o.cost == 12000
 
-    # sửa lại giá vốn sau khi đã giao
-    upd = await c.post(
-        f"/admin/orders/{oid}/complete-upgrade", data={"cost": "9000"}, cookies=headers
-    )
-    assert upd.status_code == 303
+    # cập nhật lại giá vốn sau khi đã giao
+    upd = await c.post(f"/admin/api/orders/{oid}/complete-upgrade", json={"cost": 9000}, cookies=headers)
+    assert upd.status_code == 200
     async with maker() as session:
         assert (await repo.get_order(session, oid)).cost == 9000
 
 
-async def test_orders_and_sold_pages(client):
+# ---------- Orders & sold ----------
+
+async def test_orders_and_sold(client):
     c, maker = client
-    cookie = webauth.make_token(1)
-    # tạo đơn + giao hàng để có dữ liệu "đã bán"
+    headers = _auth()
     async with maker() as session:
         p = await repo.create_product(session, name="Spotify", price=5000)
         await session.flush()
@@ -241,14 +193,33 @@ async def test_orders_and_sold_pages(client):
         await order_service.confirm_payment(session, created.order, payment_tx_id="FT9", transfer_amount=5000)
         code, oid = created.order.code, created.order.id
 
-    headers = {webauth.COOKIE_NAME: cookie}
-    orders = await c.get("/admin/orders", cookies=headers)
-    assert orders.status_code == 200 and code in orders.text
+    orders = await c.get("/admin/api/orders", cookies=headers)
+    assert orders.status_code == 200
+    assert any(o["code"] == code for o in orders.json()["orders"])
 
-    detail = await c.get(f"/admin/orders/{oid}", cookies=headers)
+    detail = await c.get(f"/admin/api/orders/{oid}", cookies=headers)
     assert detail.status_code == 200
-    assert "acc1|pw1" in detail.text and "FT9" in detail.text
+    body = detail.json()
+    assert body["order"]["payment_tx_id"] == "FT9"
+    assert any(it["payload"] == "acc1|pw1" for it in body["items"])
 
-    sold = await c.get("/admin/sold", cookies=headers)
+    sold = await c.get("/admin/api/sold", cookies=headers)
     assert sold.status_code == 200
-    assert "acc1|pw1" in sold.text and "Spotify" in sold.text
+    rows = sold.json()["sold"]
+    assert any(r["payload"] == "acc1|pw1" and r["product_name"] == "Spotify" for r in rows)
+
+
+# ---------- MBBank ----------
+
+async def test_mbbank_status_and_save(client):
+    c, _ = client
+    headers = _auth()
+    st = await c.get("/admin/api/mbbank", cookies=headers)
+    assert st.status_code == 200 and st.json()["configured"] is False
+
+    save = await c.post("/admin/api/mbbank", json={"username": "myuser", "password": "mypass", "account_no": "123"}, cookies=headers)
+    assert save.status_code == 200
+
+    st2 = await c.get("/admin/api/mbbank", cookies=headers)
+    body = st2.json()
+    assert body["configured"] is True and body["account_no"] == "123"
