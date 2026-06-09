@@ -1,0 +1,21 @@
+services:
+  botai:
+    build: .
+    image: botai:latest
+    container_name: botai
+    restart: unless-stopped
+    # Cấu hình lấy từ .env (KHÔNG nướng secret vào image).
+    env_file: .env
+    ports:
+      - "8000:8000"
+    # Giữ SQLite bền vững qua các lần restart/rebuild.
+    volumes:
+      - botai-data:/app/data
+    # Đẩy DB vào volume (ghi đè DATABASE_URL trong .env nếu cần).
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/bot.db
+      - WEBHOOK_HOST=0.0.0.0
+      - WEBHOOK_PORT=8000
+
+volumes:
+  botai-data:

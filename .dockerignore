@@ -1,0 +1,23 @@
+# Giữ context build nhỏ nhất + KHÔNG đưa secrets/artefact vào image
+.git
+.gitignore
+.venv
+venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+.pytest_cache
+.env
+*.db
+tests
+docs
+requirements-dev.txt
+pytest.ini
+README.md
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Frontend: chỉ cần source để build trong image, bỏ thư mục nặng
+admin/node_modules
+admin/dist
