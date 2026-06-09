@@ -7,7 +7,7 @@ import {
 } from 'naive-ui'
 import {
   GridOutline, CubeOutline, ReceiptOutline, CartOutline,
-  SettingsOutline, LogOutOutline, RocketOutline,
+  LogOutOutline, RocketOutline,
 } from '@vicons/ionicons5'
 import { themeOverrides } from './theme'
 import { api, setUnauthorizedHandler } from './api'
@@ -27,7 +27,6 @@ const menuOptions = [
   { label: 'Sản phẩm', key: 'products', icon: icon(CubeOutline), path: '/products' },
   { label: 'Đơn hàng', key: 'orders', icon: icon(ReceiptOutline), path: '/orders' },
   { label: 'Đã bán', key: 'sold', icon: icon(CartOutline), path: '/sold' },
-  { label: 'Cấu hình', key: 'settings', icon: icon(SettingsOutline), path: '/settings' },
 ]
 
 const activeKey = computed(() => {
@@ -36,7 +35,6 @@ const activeKey = computed(() => {
   if (p.startsWith('/products')) return 'products'
   if (p.startsWith('/orders')) return 'orders'
   if (p.startsWith('/sold')) return 'sold'
-  if (p.startsWith('/settings')) return 'settings'
   return ''
 })
 

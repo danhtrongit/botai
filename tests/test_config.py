@@ -10,7 +10,6 @@ def _make(admin_ids: str) -> Settings:
         bot_token="x",
         bank_account="1",
         bank_code="MB",
-        encryption_key="9Grv7hIxCZzCx7SMcGEfHUQrsprIwFHBhPV6vi5YnR4=",
         admin_ids=admin_ids,
     )
 

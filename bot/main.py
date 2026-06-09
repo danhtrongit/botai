@@ -12,7 +12,6 @@ from aiogram.types import BotCommand, MenuButtonCommands
 from bot.config import get_settings
 from bot.db.database import async_session, init_db
 from bot.handlers import admin, user
-from bot.services import mbbank_poll
 from bot.services import orders as order_service
 from webhook.server import create_app
 
@@ -52,8 +51,8 @@ async def main() -> None:
     )
     server = uvicorn.Server(config)
 
-    logger.info("Khởi động bot (polling) + web server tại %s:%s + quét MBBank mỗi %ss",
-                settings.webhook_host, settings.webhook_port, settings.mb_poll_interval)
+    logger.info("Khởi động bot (polling) + web server tại %s:%s (duyệt đơn thủ công)",
+                settings.webhook_host, settings.webhook_port)
 
     await bot.delete_webhook(drop_pending_updates=True)
 
@@ -70,7 +69,6 @@ async def main() -> None:
         dp.start_polling(bot),
         server.serve(),
         expire_loop(),
-        mbbank_poll.poll_loop(bot, settings.mb_poll_interval),
     )
 
 

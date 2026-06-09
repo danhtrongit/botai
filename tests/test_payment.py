@@ -35,33 +35,3 @@ def test_order_note_friendly_and_stable():
     assert any(note.startswith(p + " ") for p in payment.ORDER_NOTE_PREFIXES)
     # Ổn định: cùng mã -> cùng lời nhắn.
     assert payment.order_note(code) == note
-    # Sau khi chuẩn hoá vẫn match được mã đơn (đối soát không đổi).
-    assert payment.match_order_code([code], note) == code
-
-
-def test_normalize_ref_joins_split_chars():
-    # Ngân hàng tự tách: "MDKLNC11CC" -> "MDKL NC11CC".
-    assert payment.normalize_ref("MDKL NC11CC") == "MDKLNC11CC"
-    assert payment.normalize_ref("mdkl-nc11cc") == "MDKLNC11CC"
-    assert payment.normalize_ref("  k7qx m4p9 rt ") == "K7QXM4P9RT"
-    assert payment.normalize_ref(None) == ""
-
-
-def test_match_order_code_tolerates_splitting():
-    codes = ["K7QXM4P9RT", "ABCD234XYZ"]
-    # Mã bị chèn khoảng trắng vẫn khớp.
-    assert payment.match_order_code(codes, "NGUYEN VAN A K7QX M4P9RT chuyen tien") == "K7QXM4P9RT"
-    # Mã nằm trong addDescription.
-    assert payment.match_order_code(codes, "ck", "ma ABCD 234 XYZ") == "ABCD234XYZ"
-
-
-def test_match_order_code_none_when_missing():
-    codes = ["K7QXM4P9RT"]
-    assert payment.match_order_code(codes, "chuyen tien khong co ma") is None
-    assert payment.match_order_code(codes, None) is None
-    assert payment.match_order_code([], "K7QXM4P9RT") is None
-
-
-def test_match_order_code_still_matches_legacy_bot_codes():
-    # Đơn cũ dạng BOT000042 vẫn nhận diện được.
-    assert payment.match_order_code(["BOT000042"], "ck bot000042 ne") == "BOT000042"

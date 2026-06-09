@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 
 from bot.db import models, repo
 from bot.db.database import async_session
-from bot.services import mb_store, webauth
+from bot.services import webauth
 
 logger = logging.getLogger(__name__)
 
@@ -131,21 +131,10 @@ def create_admin_router(bot: Bot | None = None) -> APIRouter:
             revenue, cost, profit, count = await repo.profit_summary(session)
             orders = await repo.list_recent_orders(session, limit=10)
             products = {p.id: p.name for p in await repo.list_products(session, only_active=False)}
-            mb_creds = await mb_store.get_credentials(session)
-
-        if mb_creds:
-            mb = {
-                "configured": True,
-                "username_masked": (mb_creds.username[:2] + "***") if mb_creds.username else "***",
-                "account_no": mb_creds.account_no or "",
-            }
-        else:
-            mb = {"configured": False}
 
         return {
             "stats": {"revenue": revenue, "cost": cost, "profit": profit, "delivered": count},
             "recent_orders": [_order_dict(o, products.get(o.product_id)) for o in orders],
-            "mbbank": mb,
         }
 
     # ---------- Products ----------
@@ -355,31 +344,6 @@ def create_admin_router(bot: Bot | None = None) -> APIRouter:
                 "paid_at": str(order.paid_at) if order.paid_at else None,
             })
         return {"sold": result}
-
-    # ---------- MBBank ----------
-
-    @router.get("/api/mbbank")
-    async def mbbank_status(admin_id: int = Depends(require_admin)):
-        async with async_session() as session:
-            creds = await mb_store.get_credentials(session)
-        if not creds:
-            return {"configured": False}
-        return {
-            "configured": True,
-            "username_masked": (creds.username[:2] + "***") if creds.username else "***",
-            "account_no": creds.account_no or "",
-        }
-
-    @router.post("/api/mbbank")
-    async def save_mbbank(payload: dict = Body(...), admin_id: int = Depends(require_admin)):
-        username = (payload.get("username") or "").strip()
-        password = payload.get("password") or ""
-        account_no = (payload.get("account_no") or "").strip()
-        if not username or not password:
-            raise HTTPException(status_code=422, detail="Thiếu tên đăng nhập hoặc mật khẩu")
-        async with async_session() as session:
-            await mb_store.save_credentials(session, username, password, account_no)
-        return {"ok": True}
 
     # ---------- SPA serving ----------
     # Phục vụ file tĩnh đã build; nếu không phải file cụ thể -> trả index.html cho client-router.

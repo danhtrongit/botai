@@ -61,7 +61,7 @@ async def test_session_and_overview(client):
     ov = await c.get("/admin/api/overview", cookies=_auth())
     assert ov.status_code == 200
     body = ov.json()
-    assert "stats" in body and "recent_orders" in body and "mbbank" in body
+    assert "stats" in body and "recent_orders" in body
 
 
 async def test_bad_token_rejected(client):
@@ -155,7 +155,7 @@ async def test_upgrade_product_and_complete(client):
             session, buyer_tg_id=7, buyer_username=None, product_id=prod.id,
             quantity=1, buyer_email="me@mail.com",
         )
-        await order_service.confirm_payment(session, created.order, payment_tx_id="FTUP", transfer_amount=50000)
+        await order_service.approve_order(session, created.order, admin_id=1)
         oid = created.order.id
         assert created.order.status == models.AWAITING_UPGRADE
 
@@ -190,7 +190,7 @@ async def test_orders_and_sold(client):
         created = await order_service.create_order(
             session, buyer_tg_id=9, buyer_username="kh", product_id=p.id, quantity=1
         )
-        await order_service.confirm_payment(session, created.order, payment_tx_id="FT9", transfer_amount=5000)
+        await order_service.approve_order(session, created.order, admin_id=1)
         code, oid = created.order.code, created.order.id
 
     orders = await c.get("/admin/api/orders", cookies=headers)
@@ -200,26 +200,10 @@ async def test_orders_and_sold(client):
     detail = await c.get(f"/admin/api/orders/{oid}", cookies=headers)
     assert detail.status_code == 200
     body = detail.json()
-    assert body["order"]["payment_tx_id"] == "FT9"
+    assert body["order"]["payment_tx_id"] == "manual:1"
     assert any(it["payload"] == "acc1|pw1" for it in body["items"])
 
     sold = await c.get("/admin/api/sold", cookies=headers)
     assert sold.status_code == 200
     rows = sold.json()["sold"]
     assert any(r["payload"] == "acc1|pw1" and r["product_name"] == "Spotify" for r in rows)
-
-
-# ---------- MBBank ----------
-
-async def test_mbbank_status_and_save(client):
-    c, _ = client
-    headers = _auth()
-    st = await c.get("/admin/api/mbbank", cookies=headers)
-    assert st.status_code == 200 and st.json()["configured"] is False
-
-    save = await c.post("/admin/api/mbbank", json={"username": "myuser", "password": "mypass", "account_no": "123"}, cookies=headers)
-    assert save.status_code == 200
-
-    st2 = await c.get("/admin/api/mbbank", cookies=headers)
-    body = st2.json()
-    assert body["configured"] is True and body["account_no"] == "123"

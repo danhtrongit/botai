@@ -2,7 +2,7 @@
 import { ref, onMounted, h } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  NGrid, NGi, NCard, NStatistic, NDataTable, NSpin, NAlert, NH1, NText,
+  NGrid, NGi, NCard, NStatistic, NDataTable, NSpin, NH1, NText,
 } from 'naive-ui'
 import { api, fmtVnd } from '../api'
 import { statusTag } from '../status'
@@ -51,20 +51,6 @@ onMounted(async () => {
           <n-gi><n-card><n-statistic label="Lợi nhuận" :value="fmtVnd(data.stats.profit)" /></n-card></n-gi>
           <n-gi><n-card><n-statistic label="Đơn đã giao" :value="data.stats.delivered" /></n-card></n-gi>
         </n-grid>
-
-        <n-alert
-          v-if="data.mbbank.configured"
-          type="success" style="margin-bottom:20px" title="MBBank đã kết nối"
-        >
-          Đang quét giao dịch tự động · user
-          <span class="mono">{{ data.mbbank.username_masked }}</span>
-          · TK <span class="mono">{{ data.mbbank.account_no || 'tự dò' }}</span>
-        </n-alert>
-        <n-alert
-          v-else type="warning" style="margin-bottom:20px" title="Chưa cấu hình MBBank"
-        >
-          Bot chưa thể tự đối soát. Vào <b>Cấu hình</b> để nhập TK/MK MBBank.
-        </n-alert>
 
         <n-card title="Đơn gần đây">
           <n-data-table :columns="orderColumns" :data="data.recent_orders" :row-props="rowProps" />

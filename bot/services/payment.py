@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 import secrets
 from urllib.parse import urlencode
 
@@ -26,9 +25,6 @@ ORDER_NOTE_PREFIXES = (
     "gui banh mi",
 )
 
-# Mọi ký tự không phải chữ/số đều bị loại khi chuẩn hoá (dùng để "nối lại" chuỗi bị tách).
-_NON_ALNUM_RE = re.compile(r"[^A-Z0-9]")
-
 # VietQR.io: ảnh QR miễn phí, không phụ thuộc SePay.
 VIETQR_TEMPLATE = "compact2"
 
@@ -45,22 +41,12 @@ def generate_order_code(length: int = ORDER_CODE_LENGTH) -> str:
 def order_note(code: str) -> str:
     """Nội dung chuyển khoản thân thiện: "<lời nhắn> <mã đơn>" (vd "gui cafe K7QXM4P9RT").
 
-    Lời nhắn chọn ổn định theo mã (cùng mã -> cùng lời nhắn) để QR, tin nhắn hướng dẫn
-    và nội dung khách gõ luôn trùng nhau. Mã đơn vẫn xuất hiện nguyên vẹn nên đối soát
-    (match_order_code) không bị ảnh hưởng.
+    Lời nhắn chọn ổn định theo mã (cùng mã -> cùng lời nhắn) để QR và tin nhắn hướng dẫn
+    luôn trùng nhau, giúp admin dễ tra cứu khi đối chiếu sao kê thủ công.
     """
     digest = int(hashlib.md5(code.encode("utf-8")).hexdigest(), 16)
     prefix = ORDER_NOTE_PREFIXES[digest % len(ORDER_NOTE_PREFIXES)]
     return f"{prefix} {code}"
-
-
-def normalize_ref(text: str | None) -> str:
-    """Chuẩn hoá nội dung chuyển khoản: viết HOA + bỏ mọi ký tự không phải chữ/số.
-
-    Đây là bước "tự nối ký tự": nhiều ngân hàng tự chèn khoảng trắng/dấu vào nội dung
-    (vd "MDKLNC11CC" -> "MDKL NC11CC"), nên ta gộp lại trước khi so khớp mã đơn.
-    """
-    return _NON_ALNUM_RE.sub("", (text or "").upper())
 
 
 def build_qr_url(amount: int, code: str) -> str:
@@ -71,20 +57,3 @@ def build_qr_url(amount: int, code: str) -> str:
     if settings.bank_account_name:
         params["accountName"] = settings.bank_account_name
     return f"{base}?{urlencode(params)}"
-
-
-def match_order_code(candidate_codes, *fields: str | None) -> str | None:
-    """Tìm mã đơn khớp trong nội dung giao dịch, chịu được việc bị tách ký tự.
-
-    Gộp tất cả field về một chuỗi đã chuẩn hoá rồi kiểm tra từng mã đơn ứng viên có
-    phải chuỗi con không. So khớp theo chuỗi con để bắt được trường hợp mã bị tách ở
-    bất kỳ vị trí nào. Trả về mã khớp đầu tiên, hoặc None.
-    """
-    haystack = "".join(normalize_ref(f) for f in fields)
-    if not haystack:
-        return None
-    for code in candidate_codes:
-        norm = normalize_ref(code)
-        if norm and norm in haystack:
-            return code
-    return None

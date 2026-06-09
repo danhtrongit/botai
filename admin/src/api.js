@@ -58,9 +58,6 @@ export const api = {
   completeUpgrade: (id, cost) => request('POST', `/orders/${id}/complete-upgrade`, { cost }),
 
   sold: () => request('GET', '/sold'),
-
-  mbbank: () => request('GET', '/mbbank'),
-  saveMbbank: (p) => request('POST', '/mbbank', p),
 }
 
 // Tiện ích định dạng tiền VND.

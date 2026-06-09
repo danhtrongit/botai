@@ -81,8 +81,17 @@ def quantity_keyboard(product_id: int, qty: int, max_qty: int) -> InlineKeyboard
 
 def payment_keyboard(order_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Kiểm tra thanh toán", callback_data=f"ordercheck:{order_id}")
+    kb.button(text="✅ Tôi đã chuyển khoản", callback_data=f"ipaid:{order_id}")
     kb.button(text="❌ Hủy đơn", callback_data=f"ordercancel:{order_id}")
     kb.button(text="🆘 Liên hệ hỗ trợ", url=get_settings().support_url)
     kb.adjust(1)
+    return kb.as_markup()
+
+
+def admin_review_keyboard(order_id: int) -> InlineKeyboardMarkup:
+    """Nút admin duyệt đơn: Chấp nhận / Từ chối."""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Chấp nhận", callback_data=f"adm_ok:{order_id}")
+    kb.button(text="❌ Từ chối", callback_data=f"adm_no:{order_id}")
+    kb.adjust(2)
     return kb.as_markup()

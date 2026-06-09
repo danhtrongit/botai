@@ -250,10 +250,6 @@ async def get_order_by_code(session: AsyncSession, code: str) -> Order | None:
     return await session.scalar(select(Order).where(Order.code == code))
 
 
-async def get_order_by_payment_tx(session: AsyncSession, payment_tx_id: str) -> Order | None:
-    return await session.scalar(select(Order).where(Order.payment_tx_id == payment_tx_id))
-
-
 async def list_orders_by_buyer(session: AsyncSession, buyer_tg_id: int, limit: int = 10) -> list[Order]:
     stmt = (
         select(Order)
@@ -295,15 +291,9 @@ async def list_sold_items(session: AsyncSession, limit: int = 200) -> list:
 
 
 async def count_pending_orders(session: AsyncSession) -> int:
-    """Số đơn đang chờ thanh toán (dùng để quyết định có cần quét MBBank không)."""
+    """Số đơn đang chờ thanh toán."""
     stmt = select(func.count(Order.id)).where(Order.status == models.PENDING)
     return int((await session.scalar(stmt)) or 0)
-
-
-async def list_pending_order_codes(session: AsyncSession) -> list[str]:
-    """Danh sách mã đơn đang chờ thanh toán — dùng làm ứng viên khi đối soát giao dịch."""
-    stmt = select(Order.code).where(Order.status == models.PENDING)
-    return list((await session.scalars(stmt)).all())
 
 
 async def complete_upgrade(session: AsyncSession, order: Order, cost: int | None = None) -> bool:

@@ -6,10 +6,44 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import BufferedInputFile
 
+from bot import keyboards
 from bot.config import get_settings
 from bot.db.models import Order
 
 logger = logging.getLogger(__name__)
+
+
+def _order_summary(order: Order, *, is_upgrade: bool) -> str:
+    """Tóm tắt đơn để hiển thị cho admin."""
+    buyer = f"<code>{order.buyer_tg_id}</code>"
+    if order.buyer_username:
+        buyer += f" (@{order.buyer_username})"
+    lines = [
+        f"Mã đơn: <code>{order.code}</code>",
+        f"Sản phẩm: #{order.product_id} · SL {order.quantity}",
+        f"Số tiền: <b>{order.total_amount:,}đ</b>",
+        f"Khách: {buyer}",
+    ]
+    if is_upgrade:
+        lines.append(f"Email nâng cấp: <code>{order.buyer_email or '(chưa có)'}</code>")
+    return "\n".join(lines)
+
+
+async def notify_admins_review(bot: Bot, order: Order, *, is_upgrade: bool) -> None:
+    """Khách báo đã chuyển khoản -> gửi admin đơn kèm nút Chấp nhận / Từ chối."""
+    settings = get_settings()
+    text = (
+        "🔔 <b>ĐƠN CHỜ DUYỆT</b> (khách báo đã chuyển khoản)\n"
+        f"{_order_summary(order, is_upgrade=is_upgrade)}\n\n"
+        "Kiểm tra tài khoản nhận tiền rồi bấm <b>Chấp nhận</b> để giao hàng, "
+        "hoặc <b>Từ chối</b> để huỷ đơn."
+    )
+    markup = keyboards.admin_review_keyboard(order.id)
+    for admin_id in settings.admin_ids:
+        try:
+            await bot.send_message(admin_id, text, reply_markup=markup)
+        except TelegramAPIError as exc:
+            logger.error("Gửi đơn %s cho admin %s thất bại: %s", order.code, admin_id, exc)
 
 
 async def deliver(bot: Bot, order: Order, payloads: list[str]) -> bool:

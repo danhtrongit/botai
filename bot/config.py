@@ -19,11 +19,6 @@ class Settings(BaseSettings):
     bank_code: str  # mã VietQR/Napas, vd VietinBank = ICB, MBBank = MB
     bank_account_name: str = ""
 
-    # Khóa Fernet để mã hoá thông tin đăng nhập MBBank khi lưu DB (44 ký tự base64)
-    encryption_key: str
-    # Chu kỳ quét lịch sử giao dịch MBBank (giây)
-    mb_poll_interval: int = 25
-
     webhook_host: str = "0.0.0.0"
     webhook_port: int = 8000
     webhook_path: str = "/webhook"
@@ -33,7 +28,7 @@ class Settings(BaseSettings):
     # Khóa ký cookie/token phiên web admin
     web_secret: str = "dev-secret-change-me"
 
-    order_expiry_minutes: int = 15
+    order_expiry_minutes: int = 5
 
     # Link liên hệ hỗ trợ (Telegram)
     support_url: str = "https://t.me/ncp_ai"

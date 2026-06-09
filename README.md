@@ -1,19 +1,20 @@
-# Bot bán tài khoản digital + tự đối soát MBBank
+# Bot bán tài khoản digital + duyệt đơn thủ công
 
-Bot Telegram (aiogram) bán tài khoản digital theo luồng **Chọn sản phẩm → Chọn số lượng → Thanh toán QR**.
-Hệ thống **tự sinh mã đơn ngẫu nhiên** (chuỗi chữ HOA + số, bỏ ký tự dễ nhầm) và **tự đối soát**: bot định kỳ đăng nhập MBBank (thư viện `mbbank-lib`), quét lịch sử giao dịch; khi thấy tiền vào khớp mã đơn → **tự động giao tài khoản** (mỗi tài khoản là 1 dòng text trong kho) cho khách. Khi đối soát, nội dung CK được **chuẩn hoá (gộp lại ký tự bị ngân hàng tách)** trước khi so khớp, nên mã bị chèn khoảng trắng vẫn nhận đúng. **Không dùng webhook.**
+Bot Telegram (aiogram) bán tài khoản digital theo luồng **Chọn sản phẩm → Chọn số lượng → Thanh toán QR → Admin duyệt**.
+Hệ thống **tự sinh mã đơn ngẫu nhiên** (chuỗi chữ HOA + số, bỏ ký tự dễ nhầm) và sinh QR VietQR với nội dung CK thân thiện (vd `gui cafe K7QXM4P9RT`). Sau khi chuyển khoản, khách bấm **✅ Tôi đã chuyển khoản**; admin nhận thông báo kèm 2 nút **Chấp nhận / Từ chối** ngay trong Telegram. Chấp nhận → bot giao tài khoản (mỗi tài khoản là 1 dòng text trong kho). **Không dùng webhook, không lưu thông tin ngân hàng.**
 
 ## Tính năng
 - Luồng mua hàng bằng nút bấm (inline keyboard) theo sản phẩm/số lượng.
-- Sinh QR VietQR tự động qua `img.vietqr.io`, nội dung CK là mã đơn duy nhất.
-- Tự đối soát MBBank: quét giao dịch mỗi `MB_POLL_INTERVAL` giây, lọc tiền vào, **idempotent** theo `refNo`, đối soát số tiền, tự giao hàng.
-- Đơn chưa thanh toán **tự hết hạn** và hoàn kho.
-- Quản trị bằng **trang web** (bot chỉ còn 1 lệnh `/login`); nhập TK/MK MBBank trên web, **mã hoá Fernet khi lưu**.
+- Sinh QR VietQR tự động qua `img.vietqr.io`, nội dung CK gồm lời nhắn thân thiện + mã đơn duy nhất.
+- **Duyệt đơn thủ công**: khách báo đã CK → admin Chấp nhận/Từ chối qua nút inline; Chấp nhận giao hàng (hoặc chuyển chờ nâng cấp với SP nâng cấp chính chủ), Từ chối huỷ đơn + hoàn kho.
+- Đơn chưa được duyệt **tự hết hạn** sau `ORDER_EXPIRY_MINUTES` phút và hoàn kho.
+- Quản trị bằng **trang web** (bot chỉ còn 1 lệnh `/login`): quản lý sản phẩm, kho, xem đơn & doanh thu.
 
-## Đối soát qua MBBank (`bot/services/mbbank_poll.py`)
-- Vào `/admin` nhập **tên đăng nhập + mật khẩu MBBank** (+ số TK, để trống thì tự dò TK đầu tiên). Lưu mã hoá bằng `ENCRYPTION_KEY` (Fernet) trong bảng `app_settings`.
-- Vòng lặp nền (cạnh polling Telegram) gọi `getTransactionAccountHistory`; với mỗi giao dịch `creditAmount > 0`: lấy mã đơn `BOT…` trong `description`/`addDescription`, bỏ qua `refNo` đã xử lý, đối soát số tiền rồi giao hàng.
-- Captcha MBBank tự giải bằng onnxruntime (đi kèm `mbbank-lib`).
+## Duyệt đơn thủ công
+- Khách bấm **✅ Tôi đã chuyển khoản** trên màn QR → tất cả admin trong `ADMIN_IDS` nhận tin nhắn tóm tắt đơn (mã, sản phẩm, số tiền, khách, email nếu là đơn nâng cấp) kèm nút **Chấp nhận / Từ chối**.
+- **Chấp nhận**: SP tài khoản → đánh dấu kho đã bán và gửi file `.txt` cho khách; SP nâng cấp chính chủ → chuyển trạng thái `awaiting_upgrade` để admin xử lý qua trang web.
+- **Từ chối**: huỷ đơn (`expired`) + hoàn kho, báo khách đơn bị từ chối.
+- Nút duyệt chống double-click: đơn đã xử lý/hết hạn sẽ báo "không còn ở trạng thái chờ".
 
 ## Cài đặt
 
@@ -32,11 +33,9 @@ cp .env.example .env   # rồi sửa các giá trị bên dưới
 | `BANK_ACCOUNT` | Số tài khoản nhận tiền (sinh QR) |
 | `BANK_CODE` | Mã ngân hàng VietQR/Napas (vd VietinBank=`ICB`, MBBank=`MB`) |
 | `BANK_ACCOUNT_NAME` | Tên chủ TK (tuỳ chọn, hiển thị trên QR) |
-| `ENCRYPTION_KEY` | Fernet key mã hoá TK/MK MBBank khi lưu (`Fernet.generate_key()`) |
-| `MB_POLL_INTERVAL` | Chu kỳ quét giao dịch MBBank (giây, mặc định 25) |
 | `PUBLIC_BASE_URL` | URL công khai (domain) để sinh link `/login` |
 | `WEB_SECRET` | Khóa ký cookie/token phiên web admin |
-| `ORDER_EXPIRY_MINUTES` | Thời gian đơn hết hạn (phút) |
+| `ORDER_EXPIRY_MINUTES` | Thời gian đơn hết hạn nếu admin chưa duyệt (phút, mặc định 5) |
 | `DATABASE_URL` | Mặc định `sqlite+aiosqlite:///bot.db` |
 
 > ⚠️ **Bảo mật:** không commit file `.env`.
@@ -47,15 +46,10 @@ cp .env.example .env   # rồi sửa các giá trị bên dưới
 python -m bot.main
 ```
 
-Lệnh trên chạy đồng thời: bot (long-polling) + web server (uvicorn) + tác vụ hết hạn đơn + vòng lặp quét MBBank.
-
-### Bật đối soát MBBank
-1. Gửi `/login` trong Telegram → mở `/admin`.
-2. Nhập **tên đăng nhập + mật khẩu MBBank** (+ số TK nếu muốn) → Lưu.
-3. Bot bắt đầu quét giao dịch và tự giao hàng khi nhận đủ tiền.
+Lệnh trên chạy đồng thời: bot (long-polling) + web server (uvicorn) + tác vụ hết hạn đơn.
 
 ## Quản trị (web)
-Trang quản trị là **SPA (Vite + Vue 3 + Naive UI, theme navy đậm)** trong thư mục `admin/`, phục vụ dưới `/admin/`. Backend cung cấp **JSON API** dưới `/admin/api`. Bot chỉ còn **1 lệnh admin duy nhất: `/login`**.
+Trang quản trị là **SPA (Vite + Vue 3 + Naive UI)** trong thư mục `admin/`, phục vụ dưới `/admin/`. Backend cung cấp **JSON API** dưới `/admin/api`. Bot chỉ còn **1 lệnh admin duy nhất: `/login`**.
 
 ### Build admin SPA (bắt buộc trước khi chạy/deploy)
 ```bash
@@ -65,10 +59,9 @@ npm run build   # xuất ra admin/dist (FastAPI tự phục vụ)
 ```
 Dev nóng (tuỳ chọn): `npm run dev` (proxy `/admin/api` + `/admin/auth` về `127.0.0.1:8000`).
 
-
 1. Trong Telegram gửi `/login` → bot trả về link `…/admin/auth?token=…` (hết hạn sau 1 giờ, chỉ admin trong `ADMIN_IDS` mới lấy được).
 2. Mở link → trang web set cookie phiên (7 ngày) → vào trang quản trị tại `…/admin`.
-3. Tại trang quản trị có thể: thêm sản phẩm, bật/tắt sản phẩm, **nạp tài khoản vào kho** (dán mỗi dòng 1 tài khoản), **cấu hình TK/MK MBBank**, xem đơn gần đây và doanh thu.
+3. Tại trang quản trị có thể: thêm sản phẩm, bật/tắt sản phẩm, **nạp tài khoản vào kho** (dán mỗi dòng 1 tài khoản), xem đơn gần đây và doanh thu, hoàn tất đơn nâng cấp.
 
 Cần cấu hình `PUBLIC_BASE_URL` (domain) và `WEB_SECRET` trong `.env`.
 
@@ -78,7 +71,7 @@ Cần cấu hình `PUBLIC_BASE_URL` (domain) và `WEB_SECRET` trong `.env`.
 pip install -r requirements-dev.txt
 pytest
 ```
-Bộ test bao phủ: sinh/đối soát mã đơn, QR VietQR, cấp phát kho, idempotency, mã hoá TK/MK (Fernet), đối soát giao dịch MBBank (`process_transactions`), và trang admin. Test không cần `mbbank-lib` (import trễ).
+Bộ test bao phủ: sinh mã đơn, QR VietQR, cấp phát kho, duyệt/từ chối đơn (`approve_order`/`reject_order`), idempotency, và trang admin.
 
 ## Deploy (VPS + domain, ví dụ thực tế)
 Đang chạy tại **`https://ncp.danhtrong.online`** trên VPS Ubuntu (aaPanel/BT nginx):
@@ -91,13 +84,13 @@ Bộ test bao phủ: sinh/đối soát mã đơn, QR VietQR, cấp phát kho, id
 ```
 bot/
   config.py            # cấu hình (.env)
-  main.py              # entrypoint: polling + webhook + expire loop
+  main.py              # entrypoint: polling + web server + expire loop
   db/                  # models, engine, repo
-  services/            # sepay (QR/đối soát), orders (đơn + kho), delivery, webauth (token web)
-  handlers/            # user (luồng mua), admin (chỉ /login)
+  services/            # payment (QR/mã đơn), orders (đơn + kho + duyệt), delivery, webauth
+  handlers/            # user (luồng mua), admin (/login + nút Chấp nhận/Từ chối)
   keyboards.py, states.py, middlewares.py
 webhook/
-  server.py            # FastAPI: POST /sepay/webhook + mount trang admin
-  admin.py             # trang quản trị web (/admin, /admin/auth, ...)
+  server.py            # FastAPI: trang chủ + mount trang admin
+  admin.py             # JSON API quản trị + phục vụ SPA (/admin, /admin/auth, ...)
 tests/                 # pytest
 ```

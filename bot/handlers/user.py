@@ -12,7 +12,7 @@ from bot.config import get_settings
 from bot.db import models, repo
 from bot.db.database import async_session
 from bot.services import orders as order_service
-from bot.services import payment
+from bot.services import delivery, payment
 from bot.states import BuyFlow
 
 router = Router(name="user")
@@ -50,9 +50,11 @@ def _payment_caption(order, *, is_upgrade: bool, email: str | None = None) -> st
     else:
         head += f"\nSố lượng: <b>{order.quantity}</b>\n"
     tail_action = (
-        "Sau khi chuyển đủ tiền, admin sẽ nâng cấp cho email của bạn (thường trong ít phút)."
+        "Sau khi chuyển khoản, bấm <b>✅ Tôi đã chuyển khoản</b> để admin xác nhận. "
+        "Khi được duyệt, admin sẽ nâng cấp cho email của bạn (thường trong ít phút)."
         if is_upgrade
-        else "Sau khi chuyển đủ tiền, hệ thống sẽ tự động gửi tài khoản cho bạn (thường trong vài giây)."
+        else "Sau khi chuyển khoản, bấm <b>✅ Tôi đã chuyển khoản</b> để admin xác nhận. "
+        "Khi được duyệt, hệ thống sẽ gửi tài khoản cho bạn ngay."
     )
     return (
         f"{head}"
@@ -340,23 +342,26 @@ async def cb_order_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer("Đã hủy đơn.")
 
 
-@router.callback_query(F.data.startswith("ordercheck:"))
-async def cb_order_check(callback: CallbackQuery) -> None:
+@router.callback_query(F.data.startswith("ipaid:"))
+async def cb_order_paid(callback: CallbackQuery) -> None:
+    """Khách báo đã chuyển khoản -> gửi admin duyệt tay (Chấp nhận / Từ chối)."""
     order_id = int(callback.data.split(":")[1])
     async with async_session() as session:
         order = await repo.get_order(session, order_id)
-    if not order or order.buyer_tg_id != callback.from_user.id:
-        await callback.answer("Không tìm thấy đơn.", show_alert=True)
-        return
-    status_text = {
-        models.PENDING: "⏳ Chưa nhận được thanh toán. Vui lòng chuyển khoản đúng nội dung & số tiền.",
-        models.PAID: "✅ Đã nhận thanh toán, đang giao hàng...",
-        models.AWAITING_UPGRADE: "✅ Đã nhận thanh toán, admin đang nâng cấp cho email của bạn.",
-        models.DELIVERED: "✅ Đơn đã hoàn tất.",
-        models.EXPIRED: "❌ Đơn đã hết hạn/đã hủy.",
-        models.FAILED: "⚠️ Đơn gặp sự cố, vui lòng liên hệ admin.",
-    }.get(order.status, order.status)
-    await callback.answer(status_text, show_alert=True)
+        if not order or order.buyer_tg_id != callback.from_user.id:
+            await callback.answer("Không tìm thấy đơn.", show_alert=True)
+            return
+        if order.status != models.PENDING:
+            await callback.answer("Đơn đã được xử lý hoặc hết hạn.", show_alert=True)
+            return
+        product = await repo.get_product(session, order.product_id)
+        is_upgrade = bool(product) and product.kind == models.KIND_UPGRADE
+
+    await delivery.notify_admins_review(callback.bot, order, is_upgrade=is_upgrade)
+    await callback.answer(
+        "Đã gửi yêu cầu xác nhận tới admin. Vui lòng chờ duyệt (thường trong ít phút).",
+        show_alert=True,
+    )
 
 
 @router.callback_query(F.data == "menu:orders")

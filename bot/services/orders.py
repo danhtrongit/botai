@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import get_settings
 from bot.db import models, repo
 from bot.db.models import Order
-from bot.services import payment, poll_signal
+from bot.services import payment
 
 # Serialize cấp phát kho để 2 đơn không giành cùng StockItem (SQLite ghi tuần tự, lock này
 # bảo đảm an toàn ở tầng ứng dụng cho cả engine không hỗ trợ SELECT ... FOR UPDATE thực sự).
@@ -100,9 +100,6 @@ async def create_order(
 
         await session.commit()
 
-    # Có đơn pending mới -> đánh thức bộ quét MBBank để bắt thanh toán.
-    poll_signal.signal_new_order()
-
     qr_url = payment.build_qr_url(total_amount, order.code)
     return CreatedOrder(order=order, qr_url=qr_url)
 
@@ -118,29 +115,29 @@ async def cancel_order(session: AsyncSession, order: Order) -> bool:
 
 
 @dataclass
-class PaymentResult:
-    delivered: bool
-    payloads: list[str]
+class ApprovalResult:
+    ok: bool
+    delivered: bool = False
+    payloads: list[str] = None  # type: ignore[assignment]
+    awaiting_upgrade: bool = False
     reason: str = ""
-    awaiting_upgrade: bool = False  # đơn nâng cấp đã trả tiền, chờ admin xử lý tay
+
+    def __post_init__(self):
+        if self.payloads is None:
+            self.payloads = []
 
 
-async def confirm_payment(
-    session: AsyncSession, order: Order, payment_tx_id: str, transfer_amount: int
-) -> PaymentResult:
-    """Đối soát thanh toán cho 1 đơn pending. Idempotency do webhook đã kiểm tra payment_tx_id.
+async def approve_order(session: AsyncSession, order: Order, admin_id: int) -> ApprovalResult:
+    """Admin duyệt đơn pending bằng tay -> giao hàng.
 
-    SP `account`: cấp phát kho -> delivered. SP `upgrade`: chuyển awaiting_upgrade để admin xử lý.
+    SP `account`: đánh dấu kho đã bán -> delivered (trả payloads để gửi file).
+    SP `upgrade`: chuyển awaiting_upgrade để admin nâng cấp chính chủ theo email khách.
+    Idempotent: nếu đơn không còn pending (đã duyệt / hết hạn) thì trả ok=False.
     """
-    if order.status in (models.PAID, models.DELIVERED, models.AWAITING_UPGRADE):
-        return PaymentResult(delivered=False, payloads=[], reason="already_processed")
     if order.status != models.PENDING:
-        return PaymentResult(delivered=False, payloads=[], reason=f"status_{order.status}")
-    if transfer_amount < order.total_amount:
-        return PaymentResult(delivered=False, payloads=[], reason="underpaid")
+        return ApprovalResult(ok=False, reason=f"status_{order.status}")
 
-    order.status = models.PAID
-    order.payment_tx_id = payment_tx_id
+    order.payment_tx_id = f"manual:{admin_id}"
     order.paid_at = _now()
 
     product = await repo.get_product(session, order.product_id)
@@ -148,13 +145,23 @@ async def confirm_payment(
         # Không có kho để giao -> chờ admin nâng cấp chính chủ theo email khách.
         order.status = models.AWAITING_UPGRADE
         await session.commit()
-        return PaymentResult(delivered=False, payloads=[], reason="upgrade", awaiting_upgrade=True)
+        return ApprovalResult(ok=True, awaiting_upgrade=True)
 
     items = await repo.mark_order_items_sold(session, order.id)
     payloads = [item.payload for item in items]
     order.status = models.DELIVERED
     await session.commit()
-    return PaymentResult(delivered=True, payloads=payloads)
+    return ApprovalResult(ok=True, delivered=True, payloads=payloads)
+
+
+async def reject_order(session: AsyncSession, order: Order) -> bool:
+    """Admin từ chối đơn pending -> huỷ (expired) + trả kho. Trả True nếu đã xử lý."""
+    if order.status != models.PENDING:
+        return False
+    order.status = models.EXPIRED
+    await repo.release_order_items(session, order.id)
+    await session.commit()
+    return True
 
 
 async def expire_orders(session: AsyncSession) -> int:

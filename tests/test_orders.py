@@ -40,52 +40,61 @@ async def test_create_order_out_of_stock(session):
         )
 
 
-async def test_confirm_payment_delivers(session):
+async def test_approve_order_delivers(session):
     product = await _seed_product(session, price=10000, stock=5)
     created = await order_service.create_order(
         session, buyer_tg_id=111, buyer_username="alice", product_id=product.id, quantity=2
     )
 
-    result = await order_service.confirm_payment(
-        session, created.order, payment_tx_id="FT92704", transfer_amount=20000
-    )
+    result = await order_service.approve_order(session, created.order, admin_id=999)
 
+    assert result.ok is True
     assert result.delivered is True
     assert len(result.payloads) == 2
     assert created.order.status == models.DELIVERED
-    assert created.order.payment_tx_id == "FT92704"
+    assert created.order.payment_tx_id == "manual:999"
     summary = await repo.stock_summary(session, product.id)
     assert summary[models.SOLD] == 2
     assert summary[models.AVAILABLE] == 3
 
 
-async def test_confirm_payment_underpaid(session):
+async def test_reject_order_releases_stock(session):
     product = await _seed_product(session, price=10000, stock=5)
     created = await order_service.create_order(
         session, buyer_tg_id=1, buyer_username=None, product_id=product.id, quantity=2
     )
 
-    result = await order_service.confirm_payment(
-        session, created.order, payment_tx_id="FT1", transfer_amount=15000
-    )
+    ok = await order_service.reject_order(session, created.order)
 
-    assert result.delivered is False
-    assert result.reason == "underpaid"
-    assert created.order.status == models.PENDING
+    assert ok is True
+    assert created.order.status == models.EXPIRED
+    summary = await repo.stock_summary(session, product.id)
+    assert summary[models.AVAILABLE] == 5
+    assert summary[models.RESERVED] == 0
 
 
-async def test_confirm_payment_idempotent_on_already_delivered(session):
+async def test_approve_order_idempotent_on_already_delivered(session):
     product = await _seed_product(session, price=10000, stock=5)
     created = await order_service.create_order(
         session, buyer_tg_id=1, buyer_username=None, product_id=product.id, quantity=1
     )
-    await order_service.confirm_payment(session, created.order, payment_tx_id="FT5", transfer_amount=10000)
+    await order_service.approve_order(session, created.order, admin_id=1)
 
-    again = await order_service.confirm_payment(session, created.order, payment_tx_id="FT5", transfer_amount=10000)
-    assert again.delivered is False
-    assert again.reason == "already_processed"
+    again = await order_service.approve_order(session, created.order, admin_id=1)
+    assert again.ok is False
     summary = await repo.stock_summary(session, product.id)
     assert summary[models.SOLD] == 1
+
+
+async def test_reject_after_approve_noop(session):
+    product = await _seed_product(session, price=10000, stock=5)
+    created = await order_service.create_order(
+        session, buyer_tg_id=1, buyer_username=None, product_id=product.id, quantity=1
+    )
+    await order_service.approve_order(session, created.order, admin_id=1)
+    # Đã giao rồi thì từ chối không còn tác dụng.
+    assert await order_service.reject_order(session, created.order) is False
+    assert created.order.status == models.DELIVERED
 
 
 async def test_profit_summary(session):
@@ -96,7 +105,7 @@ async def test_profit_summary(session):
     created = await order_service.create_order(
         session, buyer_tg_id=1, buyer_username=None, product_id=product.id, quantity=2
     )
-    await order_service.confirm_payment(session, created.order, payment_tx_id="FT1", transfer_amount=20000)
+    await order_service.approve_order(session, created.order, admin_id=1)
 
     revenue, cost, profit, count = await repo.profit_summary(session)
     assert revenue == 20000
@@ -127,31 +136,30 @@ async def test_create_upgrade_order_collects_email_no_stock(session):
     assert await repo.get_order_items(session, created.order.id) == []
 
 
-async def test_confirm_payment_upgrade_awaiting(session):
+async def test_approve_order_upgrade_awaiting(session):
     product = await _seed_upgrade(session, price=50000)
     created = await order_service.create_order(
         session, buyer_tg_id=1, buyer_username=None, product_id=product.id,
         quantity=1, buyer_email="me@mail.com",
     )
-    result = await order_service.confirm_payment(
-        session, created.order, payment_tx_id="FTUP", transfer_amount=50000
-    )
+    result = await order_service.approve_order(session, created.order, admin_id=7)
+    assert result.ok is True
     assert result.delivered is False
     assert result.awaiting_upgrade is True
     assert created.order.status == models.AWAITING_UPGRADE
-    assert created.order.payment_tx_id == "FTUP"
+    assert created.order.payment_tx_id == "manual:7"
 
 
-async def test_confirm_payment_upgrade_idempotent(session):
+async def test_approve_order_upgrade_idempotent(session):
     product = await _seed_upgrade(session)
     created = await order_service.create_order(
         session, buyer_tg_id=1, buyer_username=None, product_id=product.id,
         quantity=1, buyer_email="me@mail.com",
     )
-    await order_service.confirm_payment(session, created.order, payment_tx_id="FT1", transfer_amount=product.price)
-    again = await order_service.confirm_payment(session, created.order, payment_tx_id="FT1", transfer_amount=product.price)
+    await order_service.approve_order(session, created.order, admin_id=1)
+    again = await order_service.approve_order(session, created.order, admin_id=1)
+    assert again.ok is False
     assert again.awaiting_upgrade is False
-    assert again.reason == "already_processed"
 
 
 async def test_complete_upgrade_with_cost(session):
@@ -160,7 +168,7 @@ async def test_complete_upgrade_with_cost(session):
         session, buyer_tg_id=1, buyer_username=None, product_id=product.id,
         quantity=1, buyer_email="x@y.com",
     )
-    await order_service.confirm_payment(session, created.order, payment_tx_id="FT2", transfer_amount=50000)
+    await order_service.approve_order(session, created.order, admin_id=1)
     ok = await repo.complete_upgrade(session, created.order, cost=12000)
     assert ok is True
     assert created.order.status == models.DELIVERED
