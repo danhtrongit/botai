@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from bot.config import get_settings
@@ -9,6 +10,21 @@ _settings = get_settings()
 
 engine = create_async_engine(_settings.database_url, echo=False)
 async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+
+# SQLite chỉ cho 1 writer tại 1 thời điểm. Với app chạy chung 1 process (bot polling +
+# web admin + expire_loop), 2 thao tác ghi cùng lúc (vd duyệt 2 đơn) sẽ văng
+# "database is locked". Bật WAL (reader không chặn writer) + busy_timeout (writer chờ
+# tới 5s thay vì lỗi ngay) để xử lý ghi đồng thời an toàn. Chỉ áp dụng cho SQLite.
+if _settings.database_url.startswith("sqlite"):
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragma(dbapi_conn, _record):  # noqa: ANN001
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
 
 
 async def init_db() -> None:
