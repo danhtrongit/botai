@@ -137,7 +137,9 @@ async def approve_order(session: AsyncSession, order: Order, admin_id: int) -> A
     if order.status != models.PENDING:
         return ApprovalResult(ok=False, reason=f"status_{order.status}")
 
-    order.payment_tx_id = f"manual:{admin_id}"
+    # Gắn order.code để giá trị duy nhất (cột payment_tx_id có ràng buộc UNIQUE);
+    # nếu chỉ dùng admin_id thì đơn thứ 2 cùng admin sẽ trùng -> IntegrityError.
+    order.payment_tx_id = f"manual:{admin_id}:{order.code}"
     order.paid_at = _now()
 
     product = await repo.get_product(session, order.product_id)
@@ -183,7 +185,8 @@ async def pay_with_wallet(session: AsyncSession, order: Order, user) -> Approval
         if not charged:
             return ApprovalResult(ok=False, reason="insufficient")
 
-        order.payment_tx_id = f"wallet:{user.tg_id}"
+        # Gắn order.code để duy nhất (xem chú thích ở approve_order).
+        order.payment_tx_id = f"wallet:{user.tg_id}:{order.code}"
         order.paid_at = _now()
 
         product = await repo.get_product(session, order.product_id)

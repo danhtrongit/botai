@@ -200,7 +200,7 @@ async def test_orders_and_sold(client):
     detail = await c.get(f"/admin/api/orders/{oid}", cookies=headers)
     assert detail.status_code == 200
     body = detail.json()
-    assert body["order"]["payment_tx_id"] == "manual:1"
+    assert body["order"]["payment_tx_id"] == f"manual:1:{code}"
     assert any(it["payload"] == "acc1|pw1" for it in body["items"])
 
     sold = await c.get("/admin/api/sold", cookies=headers)

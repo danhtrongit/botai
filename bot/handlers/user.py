@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
@@ -41,6 +42,25 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 def valid_email(text: str) -> bool:
     return bool(_EMAIL_RE.match((text or "").strip()))
+
+
+# --- Chống spam nút "✅ Tôi đã chuyển khoản" ---
+# Lưu mốc thời gian (monotonic) lần báo gần nhất theo từng key đơn/nạp. In-memory:
+# reset khi bot restart (chấp nhận được vì chỉ nhằm chặn spam, không phải nguồn sự thật).
+_PAID_COOLDOWN_SECONDS = 60
+_last_paid_notify: dict[str, float] = {}
+
+
+def _paid_cooldown_remaining(key: str) -> int:
+    """Trả số giây còn lại phải chờ trước khi được báo lại; 0 nếu đã hết cooldown."""
+    now = time.monotonic()
+    last = _last_paid_notify.get(key)
+    if last is not None:
+        remaining = _PAID_COOLDOWN_SECONDS - (now - last)
+        if remaining > 0:
+            return int(remaining) + 1
+    _last_paid_notify[key] = now
+    return 0
 
 
 def _payment_caption(order, *, is_upgrade: bool, email: str | None = None) -> str:
@@ -379,6 +399,14 @@ async def cb_order_paid(callback: CallbackQuery) -> None:
         product = await repo.get_product(session, order.product_id)
         is_upgrade = bool(product) and product.kind == models.KIND_UPGRADE
 
+    wait = _paid_cooldown_remaining(f"order:{order_id}")
+    if wait:
+        await callback.answer(
+            f"Bạn vừa gửi yêu cầu xác nhận. Vui lòng chờ admin duyệt (thử lại sau {wait}s).",
+            show_alert=True,
+        )
+        return
+
     await delivery.notify_admins_review(callback.bot, order, is_upgrade=is_upgrade)
     await callback.answer(
         "Đã gửi yêu cầu xác nhận tới admin. Vui lòng chờ duyệt (thường trong ít phút).",
@@ -499,6 +527,14 @@ async def cb_topup_paid(callback: CallbackQuery) -> None:
             await callback.answer("Yêu cầu đã được xử lý.", show_alert=True)
             return
         user = await repo.get_user(session, callback.from_user.id)
+
+    wait = _paid_cooldown_remaining(f"topup:{code}")
+    if wait:
+        await callback.answer(
+            f"Bạn vừa gửi yêu cầu nạp. Vui lòng chờ admin duyệt (thử lại sau {wait}s).",
+            show_alert=True,
+        )
+        return
 
     await delivery.notify_admins_topup_review(callback.bot, tx, user)
     await callback.answer(

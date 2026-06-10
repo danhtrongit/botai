@@ -52,7 +52,7 @@ async def test_approve_order_delivers(session):
     assert result.delivered is True
     assert len(result.payloads) == 2
     assert created.order.status == models.DELIVERED
-    assert created.order.payment_tx_id == "manual:999"
+    assert created.order.payment_tx_id == f"manual:999:{created.order.code}"
     summary = await repo.stock_summary(session, product.id)
     assert summary[models.SOLD] == 2
     assert summary[models.AVAILABLE] == 3
@@ -147,7 +147,7 @@ async def test_approve_order_upgrade_awaiting(session):
     assert result.delivered is False
     assert result.awaiting_upgrade is True
     assert created.order.status == models.AWAITING_UPGRADE
-    assert created.order.payment_tx_id == "manual:7"
+    assert created.order.payment_tx_id == f"manual:7:{created.order.code}"
 
 
 async def test_approve_order_upgrade_idempotent(session):
@@ -226,7 +226,7 @@ async def test_pay_with_wallet_delivers(session):
     assert result.ok and result.delivered
     assert len(result.payloads) == 2
     assert created.order.status == models.DELIVERED
-    assert created.order.payment_tx_id == "wallet:50"
+    assert created.order.payment_tx_id == f"wallet:50:{created.order.code}"
     # Ví bị trừ đúng số tiền đơn.
     user = await repo.get_user(session, 50)
     assert user.balance == 100000 - 20000
